@@ -24,6 +24,8 @@ endif
 DOCKER_BUILD := docker build \
 	--build-arg TAG=${TAG}
 
+DEPLOY_NAMESPACE ?= v3
+
 .DEFAULT_GOAL := help
 .PHONY: help
 help:
@@ -239,10 +241,10 @@ libuplink:
 
 .PHONY: deploy
 deploy: ## Update Kubernetes deployments in staging (jenkins)
-	for deployment in $$(kubectl --context nonprod -n v3 get deployment -l app=storagenode --output=jsonpath='{.items..metadata.name}'); do \
-		kubectl --context nonprod --namespace v3 patch deployment $$deployment -p"{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"storagenode\",\"image\":\"storjlabs/storagenode:${TAG}\"}]}}}}" ; \
+	for deployment in $$(kubectl --context nonprod -n ${DEPLOY_NAMESPACE} get deployment -l app=storagenode --output=jsonpath='{.items..metadata.name}'); do \
+		kubectl --context nonprod --namespace ${DEPLOY_NAMESPACE} patch deployment $$deployment -p"{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"storagenode\",\"image\":\"storjlabs/storagenode:${TAG}\"}]}}}}" ; \
 	done
-	kubectl --context nonprod --namespace v3 patch deployment earth-satellite -p"{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"satellite\",\"image\":\"storjlabs/satellite:${TAG}\"}]}}}}"
+	kubectl --context nonprod --namespace ${DEPLOY_NAMESPACE} patch deployment earth-satellite -p"{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"satellite\",\"image\":\"storjlabs/satellite:${TAG}\"}]}}}}"
 
 .PHONY: push-images
 push-images: ## Push Docker images to Docker Hub (jenkins)

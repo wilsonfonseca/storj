@@ -34,6 +34,13 @@ node('node') {
         echo "Current build result: ${currentBuild.result}"
       }
     }
+    if (env.BRANCH_NAME == "qa") {
+      /* This should only deploy to staging if the branch is master */
+      stage('Deploy to QA') {
+        sh 'make deploy DEPLOY_NAMESPACE=qa'
+        echo "Current build result: ${currentBuild.result}"
+      }
+    }
     stage('Upload') {
       sh 'make binaries-upload'
       echo "Current build result: ${currentBuild.result}"
