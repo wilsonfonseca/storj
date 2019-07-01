@@ -192,7 +192,7 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 		return Error.Wrap(err)
 	}
 
-	endpoint.log.Info("endpoint.store.Writer")
+	endpoint.log.Info("store.Writer")
 	pieceWriter, err = endpoint.store.Writer(ctx, limit.SatelliteId, limit.PieceId)
 	if err != nil {
 		return ErrInternal.Wrap(err) // TODO: report grpc status internal server error
@@ -204,24 +204,26 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 		}
 	}()
 
-	endpoint.log.Info("endpoint.monitor.AvailableBandwidth")
+	endpoint.log.Info("monitor.AvailableBandwidth")
 	availableBandwidth, err := endpoint.monitor.AvailableBandwidth(ctx)
 	if err != nil {
 		return ErrInternal.Wrap(err)
 	}
 
-	endpoint.log.Info("endpoint.monitor.AvailableSpace")
+	endpoint.log.Info("monitor.AvailableSpace")
 	availableSpace, err := endpoint.monitor.AvailableSpace(ctx)
 	if err != nil {
 		return ErrInternal.Wrap(err)
 	}
 
-	endpoint.log.Info("endpoint.SaveOrder")
+	endpoint.log.Info("SaveOrder")
 	largestOrder := pb.Order2{}
 	defer endpoint.SaveOrder(ctx, limit, &largestOrder, peer)
 
 	for {
+		endpoint.log.Info("Recv")
 		message, err = stream.Recv() // TODO: reuse messages to avoid allocations
+		endpoint.log.Info("Recv-d")
 		if err == io.EOF {
 			return ErrProtocol.New("unexpected EOF")
 		} else if err != nil {
@@ -300,7 +302,7 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 					Uplink:          peer,
 				}
 
-				endpoint.log.Info("endpoint.pieceinfo.Add")
+				endpoint.log.Info("pieceinfo.Add")
 				if err := endpoint.pieceinfo.Add(ctx, info); err != nil {
 					ignoreCancelContext := context.Background()
 					deleteErr := endpoint.store.Delete(ignoreCancelContext, limit.SatelliteId, limit.PieceId)
