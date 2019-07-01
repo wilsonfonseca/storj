@@ -192,7 +192,6 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 		return Error.Wrap(err)
 	}
 
-	endpoint.log.Info("store.Writer")
 	pieceWriter, err = endpoint.store.Writer(ctx, limit.SatelliteId, limit.PieceId)
 	if err != nil {
 		return ErrInternal.Wrap(err) // TODO: report grpc status internal server error
@@ -204,26 +203,21 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 		}
 	}()
 
-	endpoint.log.Info("monitor.AvailableBandwidth")
 	availableBandwidth, err := endpoint.monitor.AvailableBandwidth(ctx)
 	if err != nil {
 		return ErrInternal.Wrap(err)
 	}
 
-	endpoint.log.Info("monitor.AvailableSpace")
 	availableSpace, err := endpoint.monitor.AvailableSpace(ctx)
 	if err != nil {
 		return ErrInternal.Wrap(err)
 	}
 
-	endpoint.log.Info("SaveOrder")
 	largestOrder := pb.Order2{}
 	defer endpoint.SaveOrder(ctx, limit, &largestOrder, peer)
 
 	for {
-		endpoint.log.Info("Recv")
 		message, err = stream.Recv() // TODO: reuse messages to avoid allocations
-		endpoint.log.Info("Recv-d")
 		if err == io.EOF {
 			return ErrProtocol.New("unexpected EOF")
 		} else if err != nil {
@@ -244,7 +238,6 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 			largestOrder = *message.Order
 
 		case message.Chunk != nil:
-			endpoint.log.Info("Chunk")
 			if message.Chunk.Offset != pieceWriter.Size() {
 				return ErrProtocol.New("chunk out of order") // TODO: report grpc status bad message
 			}
@@ -269,12 +262,11 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 			}
 
 		case message.Done != nil:
-			endpoint.log.Info("Done")
 			expectedHash := pieceWriter.Hash()
 			if err := endpoint.VerifyPieceHash(ctx, peer, limit, message.Done, expectedHash); err != nil {
 				return err // TODO: report grpc status internal server error
 			}
-			endpoint.log.Info("pieceWriter.Commit")
+
 			if err := pieceWriter.Commit(ctx); err != nil {
 				return ErrInternal.Wrap(err) // TODO: report grpc status internal server error
 			}
@@ -302,7 +294,6 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 					Uplink:          peer,
 				}
 
-				endpoint.log.Info("pieceinfo.Add")
 				if err := endpoint.pieceinfo.Add(ctx, info); err != nil {
 					ignoreCancelContext := context.Background()
 					deleteErr := endpoint.store.Delete(ignoreCancelContext, limit.SatelliteId, limit.PieceId)
@@ -310,7 +301,6 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 				}
 			}
 
-			endpoint.log.Info("signing.SignPieceHash")
 			storageNodeHash, err := signing.SignPieceHash(ctx, endpoint.signer, &pb.PieceHash{
 				PieceId: limit.PieceId,
 				Hash:    expectedHash,
