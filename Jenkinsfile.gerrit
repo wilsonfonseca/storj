@@ -7,7 +7,7 @@ pipeline {
         }
     }
     options {
-          timeout(time: 12, unit: 'MINUTES')
+          timeout(time: 14, unit: 'MINUTES')
     }
     stages {
         stage('Start') {
