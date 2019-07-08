@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/ptypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeebo/errs"
@@ -329,9 +328,6 @@ func TestCommitSegment(t *testing.T) {
 				}
 			}
 
-			expirationDateProto, err := ptypes.TimestampProto(expirationDate)
-			require.NoError(t, err)
-
 			pointer := &pb.Pointer{
 				Type:        pb.Pointer_REMOTE,
 				SegmentSize: 10,
@@ -340,7 +336,7 @@ func TestCommitSegment(t *testing.T) {
 					Redundancy:   redundancy,
 					RemotePieces: pieces,
 				},
-				ExpirationDate: expirationDateProto,
+				ExpirationDate: expirationDate,
 			}
 
 			limits := make([]*pb.OrderLimit, len(addresedLimits))
@@ -484,7 +480,7 @@ func TestCommitSegmentPointer(t *testing.T) {
 	}{
 		{
 			Modify: func(pointer *pb.Pointer) {
-				pointer.ExpirationDate.Seconds += 100
+				pointer.ExpirationDate.Add(time.Second * 100)
 			},
 			ErrorMessage: "pointer expiration date does not match requested one",
 		},
@@ -664,10 +660,8 @@ func TestGetProjectInfo(t *testing.T) {
 
 func runCreateSegment(ctx context.Context, t *testing.T, metainfo *metainfo.Client) (*pb.Pointer, []*pb.OrderLimit) {
 	pointer := createTestPointer(t)
-	expirationDate, err := ptypes.Timestamp(pointer.ExpirationDate)
-	require.NoError(t, err)
 
-	addressedLimits, rootPieceID, err := metainfo.CreateSegment(ctx, "my-bucket-name", "file/path", -1, pointer.Remote.Redundancy, memory.MiB.Int64(), expirationDate)
+	addressedLimits, rootPieceID, err := metainfo.CreateSegment(ctx, "my-bucket-name", "file/path", -1, pointer.Remote.Redundancy, memory.MiB.Int64(), pointer.ExpirationDate)
 	require.NoError(t, err)
 
 	pointer.Remote.RootPieceId = rootPieceID
@@ -722,7 +716,7 @@ func createTestPointer(t *testing.T) *pb.Pointer {
 				},
 			},
 		},
-		ExpirationDate: ptypes.TimestampNow(),
+		ExpirationDate: time.Now(),
 	}
 	return pointer
 }

@@ -10,13 +10,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/protobuf/ptypes"
 	"github.com/zeebo/errs"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	monkit "gopkg.in/spacemonkeygo/monkit.v2"
+	"gopkg.in/spacemonkeygo/monkit.v2"
 
 	"storj.io/storj/internal/memory"
 	"storj.io/storj/internal/sync2"
@@ -292,14 +291,6 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 
 			// TODO: do this in a goroutine
 			{
-				var expiration *time.Time
-				if limit.PieceExpiration != nil {
-					exp, err := ptypes.Timestamp(limit.PieceExpiration)
-					if err != nil {
-						return ErrInternal.Wrap(err)
-					}
-					expiration = &exp
-				}
 
 				// TODO: maybe this should be as a pieceWriter.Commit(ctx, info)
 				info := &pieces.Info{
@@ -308,7 +299,7 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 					PieceID:         limit.PieceId,
 					PieceSize:       pieceWriter.Size(),
 					PieceCreation:   &limit.OrderCreation,
-					PieceExpiration: expiration,
+					PieceExpiration: &limit.PieceExpiration,
 
 					UplinkPieceHash: message.Done,
 					Uplink:          peer,
