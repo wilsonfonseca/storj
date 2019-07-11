@@ -104,7 +104,7 @@ func (planet *Planet) newSatellites(count int) ([]*satellite.Peer, error) {
 					UptimeCount:       0,
 					AuditCount:        0,
 					NewNodePercentage: 0,
-					OnlineWindow:      time.Hour,
+					OnlineWindow:      0,
 					DistinctIP:        false,
 
 					AuditReputationRepairWeight:  1,
@@ -133,8 +133,8 @@ func (planet *Planet) newSatellites(count int) ([]*satellite.Peer, error) {
 				MinRemoteSegmentSize: 0, // TODO: fix tests to work with 1024
 				MaxInlineSegmentSize: 8000,
 				Overlay:              true,
-				BwExpiration:         45,
 				RS: metainfo.RSConfig{
+					MaxSegmentSize:   64 * memory.MiB,
 					MaxBufferMem:     memory.Size(256),
 					ErasureShareSize: memory.Size(256),
 					MinThreshold:     (planet.config.StorageNodeCount * 1 / 5),
@@ -145,11 +145,12 @@ func (planet *Planet) newSatellites(count int) ([]*satellite.Peer, error) {
 				},
 			},
 			Orders: orders.Config{
-				Expiration: 45 * 24 * time.Hour,
+				Expiration: 7 * 24 * time.Hour,
 			},
 			Checker: checker.Config{
-				Interval:            30 * time.Second,
-				IrreparableInterval: 15 * time.Second,
+				Interval:                  30 * time.Second,
+				IrreparableInterval:       15 * time.Second,
+				ReliabilityCacheStaleness: 5 * time.Minute,
 			},
 			Repairer: repairer.Config{
 				MaxRepair:    10,
@@ -158,9 +159,10 @@ func (planet *Planet) newSatellites(count int) ([]*satellite.Peer, error) {
 				MaxBufferMem: 4 * memory.MiB,
 			},
 			Audit: audit.Config{
-				MaxRetriesStatDB:  0,
-				Interval:          30 * time.Second,
-				MinBytesPerSecond: 1 * memory.KB,
+				MaxRetriesStatDB:   0,
+				Interval:           30 * time.Second,
+				MinBytesPerSecond:  1 * memory.KB,
+				MinDownloadTimeout: 5 * time.Second,
 			},
 			Tally: tally.Config{
 				Interval: 30 * time.Second,

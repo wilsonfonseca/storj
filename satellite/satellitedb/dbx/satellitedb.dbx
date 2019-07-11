@@ -11,7 +11,7 @@ model value_attribution (
 )
 
 create value_attribution ()
-delete value_attribution ( 
+delete value_attribution (
 	where value_attribution.project_id = ?
 	where value_attribution.bucket_name = ?
 )
@@ -185,7 +185,7 @@ read limitoffset (
 model injuredsegment (
 	key path
 
-	field path text
+	field path blob
 	field data blob
 	field attempted utimestamp (updatable, nullable)
 )
@@ -273,24 +273,36 @@ read all (
     orderby asc project.name
 )
 
-// add is default, make composite key
 model project_payment (
-    key project_id
+    key id
+
+    field id                blob
 
     field project_id        project.id              cascade
     field payer_id          user_payment.user_id    cascade
     field payment_method_id blob
+    field is_default        bool ( updatable )
 
     field created_at        timestamp  ( autoinsert )
 )
 
 create project_payment ( )
+update project_payment ( where project_payment.id = ? )
+delete project_payment ( where project_payment.id = ? )
 
 read one (
     select project_payment
+    where project_payment.id = ? )
+read one (
+    select project_payment
+    where project_payment.project_id = ?
+    where project_payment.is_default = true
+)
+read all (
+    select project_payment
     where project_payment.project_id = ?
 )
-read one (
+read all (
     select project_payment
     where project_payment.payer_id = ?
 )
@@ -676,9 +688,9 @@ model offer (
 	field expires_at timestamp ( updatable )
 	field created_at timestamp ( autoinsert )
 
-	// status has three possible value: NoStatus=0, Default=1, Active=2.
+	// status corresponds to the values of rewards.OfferStatus
 	field status int ( updatable )
-	// type has two possible value: FREE_CREDIT=0, REFERRAL=1
+	// type corresponds to the values of rewards.OfferType
 	field type int ( updatable )
 )
 
@@ -733,7 +745,7 @@ create user_credit ()
 
 //--- metainfo buckets ---//
 
-model bucket (
+model bucket_metainfo (
 	key    id
 	unique name project_id
 
@@ -758,15 +770,22 @@ model bucket (
 	field default_redundancy_total_shares    int (updatable)
 )
 
-create bucket ()
+create bucket_metainfo ()
 
 read one (
-	select bucket
-	where bucket.project_id = ?
-	where bucket.name = ?
+	select bucket_metainfo
+	where bucket_metainfo.project_id = ?
+	where bucket_metainfo.name = ?
 )
 
-delete bucket (
-	where bucket.project_id = ?
-	where bucket.name = ?
+delete bucket_metainfo (
+	where bucket_metainfo.project_id = ?
+	where bucket_metainfo.name = ?
+)
+
+read limitoffset ( // Forward
+	select bucket_metainfo
+	where bucket_metainfo.project_id = ?
+	where bucket_metainfo.name >= ?
+	orderby asc bucket_metainfo.name
 )

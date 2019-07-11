@@ -7,21 +7,24 @@ import (
 	"context"
 	"io"
 	"os"
+	"runtime"
+	"sync/atomic"
 	"time"
 
-	"github.com/golang/protobuf/ptypes"
 	"github.com/zeebo/errs"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	monkit "gopkg.in/spacemonkeygo/monkit.v2"
+	"gopkg.in/spacemonkeygo/monkit.v2"
 
 	"storj.io/storj/internal/memory"
 	"storj.io/storj/internal/sync2"
 	"storj.io/storj/pkg/auth/signing"
+	"storj.io/storj/pkg/bloomfilter"
 	"storj.io/storj/pkg/identity"
 	"storj.io/storj/pkg/pb"
+	"storj.io/storj/pkg/storj"
 	"storj.io/storj/storagenode/bandwidth"
 	"storj.io/storj/storagenode/monitor"
 	"storj.io/storj/storagenode/orders"
@@ -43,18 +46,18 @@ var _ pb.PiecestoreServer = (*Endpoint)(nil)
 
 // OldConfig contains everything necessary for a server
 type OldConfig struct {
-	Path string `help:"path to store data in" default:"$CONFDIR/storage"`
-
-	WhitelistedSatelliteIDs string        `help:"a comma-separated list of approved satellite node ids" devDefault:"" releaseDefault:"12EayRS2V1kEsWESU9QMRseFhdxYxKicsiFmxrsLZHeLUtdps3S,118UWpMCHzs6CvSgWd9BfFVjw5K9pZbJjkfZJexMtSkmKxvvAW,121RTSDpyNZVcEU84Ticf2L1ntiuUimbWgfATz21tuvgk3vzoA6,12L9ZFwhzVpuEKMUNUqkaTLGzwY9G24tbiigLiXpmZWKwmcNDDs"`
-	SatelliteIDRestriction  bool          `help:"if true, only allow data from approved satellites" devDefault:"false" releaseDefault:"true"`
-	AllocatedDiskSpace      memory.Size   `user:"true" help:"total allocated disk space in bytes" default:"1TB"`
-	AllocatedBandwidth      memory.Size   `user:"true" help:"total allocated bandwidth in bytes" default:"2TB"`
-	KBucketRefreshInterval  time.Duration `help:"how frequently Kademlia bucket should be refreshed with node stats" default:"1h0m0s"`
+	Path                   string         `help:"path to store data in" default:"$CONFDIR/storage"`
+	WhitelistedSatellites  storj.NodeURLs `help:"a comma-separated list of approved satellite node urls" devDefault:"" releaseDefault:"12EayRS2V1kEsWESU9QMRseFhdxYxKicsiFmxrsLZHeLUtdps3S@mars.tardigrade.io:7777,118UWpMCHzs6CvSgWd9BfFVjw5K9pZbJjkfZJexMtSkmKxvvAW@satellite.stefan-benten.de:7777,121RTSDpyNZVcEU84Ticf2L1ntiuUimbWgfATz21tuvgk3vzoA6@saturn.tardigrade.io:7777,12L9ZFwhzVpuEKMUNUqkaTLGzwY9G24tbiigLiXpmZWKwmcNDDs@jupiter.tardigrade.io:7777"`
+	SatelliteIDRestriction bool           `help:"if true, only allow data from approved satellites" devDefault:"false" releaseDefault:"true"`
+	AllocatedDiskSpace     memory.Size    `user:"true" help:"total allocated disk space in bytes" default:"1TB"`
+	AllocatedBandwidth     memory.Size    `user:"true" help:"total allocated bandwidth in bytes" default:"2TB"`
+	KBucketRefreshInterval time.Duration  `help:"how frequently Kademlia bucket should be refreshed with node stats" default:"1h0m0s"`
 }
 
 // Config defines parameters for piecestore endpoint.
 type Config struct {
 	ExpirationGracePeriod time.Duration `help:"how soon before expiration date should things be considered expired" default:"48h0m0s"`
+	MaxConcurrentRequests int           `help:"how many concurrent requests are allowed, before uploads are rejected." default:"6"`
 	OrderLimitGracePeriod time.Duration `help:"how long after OrderLimit creation date are OrderLimits no longer accepted" default:"1h0m0s"`
 
 	Monitor monitor.Config
@@ -75,6 +78,8 @@ type Endpoint struct {
 	orders      orders.DB
 	usage       bandwidth.DB
 	usedSerials UsedSerials
+
+	liveRequests int32
 }
 
 // NewEndpoint creates a new piecestore endpoint.
@@ -92,12 +97,17 @@ func NewEndpoint(log *zap.Logger, signer signing.Signer, trust *trust.Pool, moni
 		orders:      orders,
 		usage:       usage,
 		usedSerials: usedSerials,
+
+		liveRequests: 0,
 	}, nil
 }
 
 // Delete handles deleting a piece on piece store.
 func (endpoint *Endpoint) Delete(ctx context.Context, delete *pb.PieceDeleteRequest) (_ *pb.PieceDeleteResponse, err error) {
 	defer mon.Task()(&ctx)(&err)
+
+	atomic.AddInt32(&endpoint.liveRequests, 1)
+	defer atomic.AddInt32(&endpoint.liveRequests, -1)
 
 	if delete.Limit.Action != pb.PieceAction_DELETE {
 		return nil, Error.New("expected delete action got %v", delete.Limit.Action) // TODO: report grpc status unauthorized or bad request
@@ -129,6 +139,15 @@ func (endpoint *Endpoint) Delete(ctx context.Context, delete *pb.PieceDeleteRequ
 func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) {
 	ctx := stream.Context()
 	defer mon.Task()(&ctx)(&err)
+
+	liveRequests := atomic.AddInt32(&endpoint.liveRequests, 1)
+	defer atomic.AddInt32(&endpoint.liveRequests, -1)
+
+	if int(liveRequests) > endpoint.config.MaxConcurrentRequests {
+		endpoint.log.Error("upload rejected, too many requests", zap.Int32("live requests", liveRequests))
+		return status.Error(codes.Unavailable, "storage node overloaded")
+	}
+
 	startTime := time.Now().UTC()
 
 	// TODO: set connection timeouts
@@ -146,7 +165,6 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 		return ErrProtocol.New("expected order limit as the first message")
 	}
 	limit := message.Limit
-
 	endpoint.log.Info("upload started", zap.Stringer("Piece ID", limit.PieceId), zap.Stringer("SatelliteID", limit.SatelliteId), zap.Stringer("Action", limit.Action))
 
 	// TODO: verify that we have have expected amount of storage before continuing
@@ -227,18 +245,18 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 		if message == nil {
 			return ErrProtocol.New("expected a message") // TODO: report grpc status bad message
 		}
+		if message.Order == nil && message.Chunk == nil && message.Done == nil {
+			return ErrProtocol.New("expected a message") // TODO: report grpc status bad message
+		}
 
-		switch {
-		default:
-			return ErrProtocol.New("message didn't contain any of order, chunk or done") // TODO: report grpc status bad message
-
-		case message.Order != nil:
+		if message.Order != nil {
 			if err := endpoint.VerifyOrder(ctx, peer, limit, message.Order, largestOrder.Amount); err != nil {
 				return err
 			}
 			largestOrder = *message.Order
+		}
 
-		case message.Chunk != nil:
+		if message.Chunk != nil {
 			if message.Chunk.Offset != pieceWriter.Size() {
 				return ErrProtocol.New("chunk out of order") // TODO: report grpc status bad message
 			}
@@ -261,8 +279,9 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 			if _, err := pieceWriter.Write(message.Chunk.Data); err != nil {
 				return ErrInternal.Wrap(err) // TODO: report grpc status internal server error
 			}
+		}
 
-		case message.Done != nil:
+		if message.Done != nil {
 			expectedHash := pieceWriter.Hash()
 			if err := endpoint.VerifyPieceHash(ctx, peer, limit, message.Done, expectedHash); err != nil {
 				return err // TODO: report grpc status internal server error
@@ -274,22 +293,14 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 
 			// TODO: do this in a goroutine
 			{
-				var expiration *time.Time
-				if limit.PieceExpiration != nil {
-					exp, err := ptypes.Timestamp(limit.PieceExpiration)
-					if err != nil {
-						return ErrInternal.Wrap(err)
-					}
-					expiration = &exp
-				}
-
 				// TODO: maybe this should be as a pieceWriter.Commit(ctx, info)
 				info := &pieces.Info{
 					SatelliteID: limit.SatelliteId,
 
 					PieceID:         limit.PieceId,
 					PieceSize:       pieceWriter.Size(),
-					PieceExpiration: expiration,
+					PieceCreation:   limit.OrderCreation,
+					PieceExpiration: limit.PieceExpiration,
 
 					UplinkPieceHash: message.Done,
 					Uplink:          peer,
@@ -303,8 +314,10 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 			}
 
 			storageNodeHash, err := signing.SignPieceHash(ctx, endpoint.signer, &pb.PieceHash{
-				PieceId: limit.PieceId,
-				Hash:    expectedHash,
+				PieceId:   limit.PieceId,
+				Hash:      expectedHash,
+				PieceSize: pieceWriter.Size(),
+				Timestamp: time.Now(),
 			})
 			if err != nil {
 				return ErrInternal.Wrap(err)
@@ -322,6 +335,10 @@ func (endpoint *Endpoint) Upload(stream pb.Piecestore_UploadServer) (err error) 
 func (endpoint *Endpoint) Download(stream pb.Piecestore_DownloadServer) (err error) {
 	ctx := stream.Context()
 	defer mon.Task()(&ctx)(&err)
+
+	atomic.AddInt32(&endpoint.liveRequests, 1)
+	defer atomic.AddInt32(&endpoint.liveRequests, -1)
+
 	startTime := time.Now().UTC()
 
 	// TODO: set connection timeouts
@@ -513,9 +530,8 @@ func (endpoint *Endpoint) SaveOrder(ctx context.Context, limit *pb.OrderLimit, o
 		return
 	}
 	err = endpoint.orders.Enqueue(ctx, &orders.Info{
-		Limit:  limit,
-		Order:  order,
-		Uplink: uplink,
+		Limit: limit,
+		Order: order,
 	})
 	if err != nil {
 		endpoint.log.Error("failed to add order", zap.Error(err))
@@ -525,6 +541,52 @@ func (endpoint *Endpoint) SaveOrder(ctx context.Context, limit *pb.OrderLimit, o
 			endpoint.log.Error("failed to add bandwidth usage", zap.Error(err))
 		}
 	}
+}
+
+// Retain keeps only piece ids specified in the request
+func (endpoint *Endpoint) Retain(ctx context.Context, retainReq *pb.RetainRequest) (*pb.RetainResponse, error) {
+	peer, err := identity.PeerIdentityFromContext(ctx)
+	if err != nil {
+		return nil, Error.Wrap(err)
+	}
+
+	filter, err := bloomfilter.NewFromBytes(retainReq.GetFilter())
+	if err != nil {
+		return nil, Error.Wrap(err)
+	}
+
+	const limit = 1000
+	offset := 0
+	hasMorePieces := true
+
+	for hasMorePieces {
+		// subtract one hour to leave room for clock difference between the satellite and storage node
+		createdBefore := retainReq.GetCreationDate().Add(-1 * time.Hour)
+
+		pieceIDs, err := endpoint.pieceinfo.GetPieceIDs(ctx, peer.ID, createdBefore, limit, offset)
+		if err != nil {
+			return nil, Error.Wrap(err)
+		}
+		for _, pieceID := range pieceIDs {
+			if !filter.Contains(pieceID) {
+				if err = endpoint.store.Delete(ctx, peer.ID, pieceID); err != nil {
+					endpoint.log.Error("failed to delete a piece", zap.Error(Error.Wrap(err)))
+					// continue because if we fail to delete from file system,
+					// we need to keep the pieceinfo so we can delete next time
+					continue
+				}
+				if err = endpoint.pieceinfo.Delete(ctx, peer.ID, pieceID); err != nil {
+					endpoint.log.Error("failed to delete piece info", zap.Error(Error.Wrap(err)))
+				}
+			}
+		}
+		hasMorePieces = (len(pieceIDs) == limit)
+		offset += len(pieceIDs)
+		// We call Gosched() here because the GC process is expected to be long and we want to keep it at low priority,
+		// so other goroutines can continue serving requests.
+		runtime.Gosched()
+	}
+	return &pb.RetainResponse{}, nil
 }
 
 // min finds the min of two values
