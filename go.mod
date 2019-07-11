@@ -36,10 +36,10 @@ require (
 	github.com/fatih/color v1.7.0
 	github.com/fatih/structs v1.0.0 // indirect
 	github.com/go-redis/redis v6.14.1+incompatible
-	github.com/gogo/protobuf v1.2.2-0.20190611061853-dadb62585089
+	github.com/gogo/protobuf v1.2.1
 	github.com/golang-migrate/migrate/v3 v3.5.2
 	github.com/golang/mock v1.3.1
-	github.com/golang/protobuf v1.3.2
+	github.com/golang/protobuf v1.3.1
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/gomodule/redigo v2.0.0+incompatible // indirect
 	github.com/google/go-cmp v0.3.0
@@ -123,7 +123,7 @@ require (
 	golang.org/x/tools v0.0.0-20190614152001-1edc8e83c897
 	google.golang.org/appengine v1.6.0 // indirect
 	google.golang.org/genproto v0.0.0-20190701230453-710ae3a149df // indirect
-	google.golang.org/grpc v1.2.1-0.20190710205655-08d23162a9a5
+	google.golang.org/grpc v1.22.0
 	gopkg.in/Shopify/sarama.v1 v1.18.0 // indirect
 	gopkg.in/cheggaaa/pb.v1 v1.0.25 // indirect
 	gopkg.in/olivere/elastic.v5 v5.0.76 // indirect

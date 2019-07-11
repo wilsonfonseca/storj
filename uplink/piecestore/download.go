@@ -54,7 +54,7 @@ func (client *Client) Download(ctx context.Context, limit *pb.OrderLimit, offset
 	if err != nil {
 		closeErr := stream.CloseSend()
 		_, recvErr := stream.Recv()
-		return nil, ErrInternal.Wrap(errs.Combine(err, ignoreEOF(closeErr), ignoreEOF(recvErr)))
+		return nil, ErrInternal.Wrap(errs.Combine(err, ignoreEOF(ctx, closeErr), ignoreEOF(ctx, recvErr)))
 	}
 
 	err = stream.Send(&pb.PieceDownloadRequest{
@@ -193,7 +193,7 @@ func (client *Download) Close() (err error) {
 
 	if alldone {
 		// if we are all done, then we expecte io.EOF, but don't care about them
-		return errs.Combine(ignoreEOF(closeErr), ignoreEOF(recvErr))
+		return errs.Combine(ignoreEOF(client.ctx, closeErr), ignoreEOF(client.ctx, recvErr))
 	}
 
 	if client.unread.Errored() {
@@ -202,7 +202,7 @@ func (client *Download) Close() (err error) {
 	}
 
 	// we probably closed download early, so we can ignore io.EOF-s
-	return errs.Combine(ignoreEOF(closeErr), ignoreEOF(recvErr))
+	return errs.Combine(ignoreEOF(client.ctx, closeErr), ignoreEOF(client.ctx, recvErr))
 }
 
 // ReadBuffer implements buffered reading with an error.
