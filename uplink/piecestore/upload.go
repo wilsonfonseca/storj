@@ -185,7 +185,7 @@ func (client *Upload) Commit(ctx context.Context) (_ *pb.PieceHash, err error) {
 		// failed to sign, let's close the sending side, no need to wait for a response
 		closeErr := client.stream.CloseSend()
 		// closeErr being io.EOF doesn't inform us about anything
-		return nil, Error.Wrap(errs.Combine(err, ignoreEOF(ctx, closeErr)))
+		return nil, Error.Wrap(errs.Combine(ignoreEOF(client.ctx, err), ignoreEOF(ctx, closeErr)))
 	}
 
 	// exchange signed piece hashes

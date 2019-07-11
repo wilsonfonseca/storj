@@ -198,7 +198,7 @@ func (client *Download) Close() (err error) {
 
 	if client.unread.Errored() {
 		// something went wrong and we didn't manage to download all the content
-		return errs.Combine(client.unread.Error(), closeErr, recvErr)
+		return errs.Combine(client.unread.Error(), ignoreEOF(client.ctx, closeErr), ignoreEOF(client.ctx, recvErr))
 	}
 
 	// we probably closed download early, so we can ignore io.EOF-s
