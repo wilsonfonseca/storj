@@ -6,10 +6,12 @@ package server
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/zeebo/errs"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	"storj.io/storj/pkg/identity"
 	"storj.io/storj/pkg/peertls/tlsopts"
@@ -58,6 +60,9 @@ func New(opts *tlsopts.Options, publicAddr, privateAddr string, interceptor grpc
 		grpc: grpc.NewServer(
 			grpc.StreamInterceptor(logOnErrorStreamInterceptor),
 			grpc.UnaryInterceptor(unaryInterceptor),
+			grpc.KeepaliveParams(keepalive.ServerParameters{
+				MaxConnectionIdle: 2 * time.Minute,
+			}),
 			opts.ServerOption(),
 		),
 	}
