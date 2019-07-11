@@ -30,21 +30,7 @@ pipeline {
 
         stage('Verification') {
             parallel {
-                stage('Lint') {
-                    steps {
-                        sh 'go run ./scripts/check-copyright.go'
-                        sh 'go run ./scripts/check-large-files.go'
-                        sh 'go run ./scripts/check-imports.go -race ./...'
-                        sh 'go run ./scripts/check-peer-constraints.go -race -fail=false'
-                        sh 'go run ./scripts/protobuf.go --protoc=$HOME/protoc/bin/protoc lint'
-                        sh 'go run ./scripts/protobuf.go --protoc=$HOME/protoc/bin/protoc check-lock'
-                        sh 'bash ./scripts/check-dbx-version.sh'
-                        sh 'golangci-lint -j=2 run'
-                        sh 'go run scripts/check-mod-tidy.go -mod .build/go.mod.orig'
-                        sh 'make check-satellite-config-lock'
-                    }
-                }
-
+                
                 stage('Tests') {
                     environment {
                         GRPC_GO_LOG_VERBOSITY_LEVEL = 'info'
@@ -55,7 +41,7 @@ pipeline {
                     steps {
                         sh 'psql -U postgres -c \'create database teststorj;\''
                         sh 'go run scripts/use-ports.go -from 1024 -to 10000 &'
-                        sh 'go test -run TestUplinksParallel -parallel 4 -p 6 -vet=off $COVERFLAGS -timeout 12m -json -race ./... 2>&1 | tee .build/tests.json | go run ./scripts/xunit.go -out .build/tests.xml'
+                        sh 'go test -run TestUplinksParallel -parallel 4 -p 6 -vet=off $COVERFLAGS -timeout 12m -json -race ./internal/testplanet 2>&1 | tee .build/tests.json | go run ./scripts/xunit.go -out .build/tests.xml'
                         sh 'go run scripts/check-clean-directory.go'
                     }
 
@@ -77,20 +63,6 @@ pipeline {
                     }
                 }
 
-                stage('Integration') {
-                    environment {
-                        // use different hostname to avoid port conflicts
-                        STORJ_NETWORK_HOST4 = '127.0.0.2'
-                        STORJ_NETWORK_HOST6 = '127.0.0.2'
-
-                        STORJ_SIM_POSTGRES = 'postgres://postgres@localhost/teststorj2?sslmode=disable'
-                    }
-
-                    steps {
-                        sh 'psql -U postgres -c \'create database teststorj2;\''
-                        sh 'make test-sim'
-                    }
-                }
             }
         }
     }
