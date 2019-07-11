@@ -33,7 +33,8 @@ pipeline {
                 
                 stage('Tests') {
                     environment {
-                        GRPC_GO_LOG_VERBOSITY_LEVEL = 'info'
+                        GRPC_GO_LOG_VERBOSITY_LEVEL = '99'
+                        GRPC_GO_LOG_SEVERITY_LEVEL = 'info'
                         GODEBUG = 'http2debug=1'
                         STORJ_POSTGRES_TEST = 'postgres://postgres@localhost/teststorj?sslmode=disable'
                         COVERFLAGS = "${ env.BRANCH_NAME != 'master' ? '' : '-coverprofile=.build/coverprofile -coverpkg=-coverpkg=storj.io/storj/bootstrap/...,storj.io/storj/internal/...,storj.io/storj/lib/...,storj.io/storj/pkg/...,storj.io/storj/satellite/...,storj.io/storj/storage/...,storj.io/storj/storagenode/...,storj.io/storj/uplink/...,storj.io/storj/versioncontrol/...'}"
