@@ -108,6 +108,8 @@ github.com/gocql/gocql v0.0.0-20180913072538-864d5908455a/go.mod h1:4Fw1eo5iaEhD
 github.com/gogo/protobuf v1.1.1/go.mod h1:r8qH/GZQm5c6nD/R0oafs1akxWv10x8SbQlK7atdtwQ=
 github.com/gogo/protobuf v1.2.1 h1:/s5zKNz0uPFCZ5hddgPdo2TK2TVrUNMn0OOX8/aZMTE=
 github.com/gogo/protobuf v1.2.1/go.mod h1:hp+jE20tsWTFYpLwKvXlhS1hjn+gTNwPg2I6zVXpSg4=
+github.com/gogo/protobuf v1.2.2-0.20190611061853-dadb62585089 h1:raOeh+DEb2K79TKYcitwQUJOc4xdEOEJsgm8zQ6q1IU=
+github.com/gogo/protobuf v1.2.2-0.20190611061853-dadb62585089/go.mod h1:hp+jE20tsWTFYpLwKvXlhS1hjn+gTNwPg2I6zVXpSg4=
 github.com/golang-migrate/migrate/v3 v3.5.2 h1:SUWSv6PD8Lr2TGx1lmVW7W2lRoQiVny3stM4He6jczQ=
 github.com/golang-migrate/migrate/v3 v3.5.2/go.mod h1:QDa9JH6Bdwbi+1jIEpOIWnTNoYRbtaVgByErXU0844E=
 github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b h1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=
