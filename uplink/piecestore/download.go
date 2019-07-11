@@ -66,7 +66,7 @@ func (client *Client) Download(ctx context.Context, limit *pb.OrderLimit, offset
 	})
 	if err != nil {
 		_, recvErr := stream.Recv()
-		return nil, ErrProtocol.Wrap(errs.Combine(err, recvErr))
+		return nil, ErrProtocol.Wrap(errs.Combine(ignoreEOF(ctx, err), ignoreEOF(ctx, recvErr)))
 	}
 
 	download := &Download{

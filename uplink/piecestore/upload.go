@@ -65,7 +65,7 @@ func (client *Client) Upload(ctx context.Context, limit *pb.OrderLimit) (_ Uploa
 	})
 	if err != nil {
 		_, closeErr := stream.CloseAndRecv()
-		return nil, ErrProtocol.Wrap(errs.Combine(err, closeErr))
+		return nil, ErrProtocol.Wrap(errs.Combine(ignoreEOF(ctx, err), ignoreEOF(ctx, closeErr)))
 	}
 
 	upload := &Upload{
@@ -135,7 +135,7 @@ func (client *Upload) Write(data []byte) (written int, err error) {
 			},
 		})
 		if err != nil {
-			err = ErrProtocol.Wrap(err)
+			err = ErrProtocol.Wrap(ignoreEOF(ctx, err))
 			client.sendError = err
 			return written, err
 		}
