@@ -39,6 +39,7 @@ type NodeProtectedDossier struct {
 	FreeDisk      int64
 
 	Reputation NodeStats
+	Contained  bool
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -143,14 +144,114 @@ func (db *Inmemory) UpdateAddress(ctx context.Context, info *pb.Node, defaults N
 	return nil
 }
 
-// UpdateStats all parts of single storagenode's stats.
-func (db *Inmemory) UpdateStats(ctx context.Context, request *UpdateRequest) (stats *NodeStats, err error) {
-	return nil, nil
-}
-
 // UpdateNodeInfo updates node dossier with info requested from the node itself like node type, email, wallet, capacity, and version.
 func (db *Inmemory) UpdateNodeInfo(ctx context.Context, node storj.NodeID, nodeInfo *pb.InfoResponse) (stats *NodeDossier, err error) {
-	return nil, nil
+	if node.IsZero() {
+		return nil, ErrEmptyNode
+	}
+
+	dossier := db.lookup(ctx, node)
+	if dossier == nil {
+		return nil, ErrNodeNotFound.New("%s", node)
+	}
+
+	dossier.Lock()
+	defer dossier.Unlock()
+
+	if nodeInfo == nil {
+		return dossier._dossier(), nil
+	}
+
+	dossier.Type = nodeInfo.Type
+
+	if operator := nodeInfo.GetOperator(); operator != nil {
+		dossier.Wallet = operator.Wallet
+		dossier.Email = operator.Email
+	}
+	if capacity := nodeInfo.GetCapacity(); capacity != nil {
+		dossier.FreeDisk = capacity.FreeDisk
+		dossier.FreeBandwidth = capacity.FreeBandwidth
+	}
+	if version := nodeInfo.GetVersion(); version != nil {
+		dossier.Version = *version
+	}
+
+	return dossier._dossier(), nil
+}
+
+// UpdateStats all parts of single storagenode's stats.
+func (db *Inmemory) UpdateStats(ctx context.Context, request *UpdateRequest) (stats *NodeStats, err error) {
+	if request == nil || request.NodeID.IsZero() {
+		return nil, ErrEmptyNode
+	}
+
+	dossier := db.lookup(ctx, request.NodeID)
+	if dossier == nil {
+		return nil, ErrNodeNotFound.New("%s", request.NodeID)
+	}
+
+	dossier.Lock()
+	defer dossier.Unlock()
+
+	if dossier.Reputation.Disqualified != nil {
+		return dossier._nodeStats(), nil
+	}
+
+	auditAlpha, auditBeta, totalAuditCount := updateReputation(
+		request.AuditSuccess,
+		dossier.Reputation.AuditReputationAlpha,
+		dossier.Reputation.AuditReputationBeta,
+		request.AuditLambda,
+		request.AuditWeight,
+		dossier.Reputation.AuditCount,
+	)
+	dossier.Reputation.AuditReputationAlpha = auditAlpha
+	dossier.Reputation.AuditReputationBeta = auditBeta
+	dossier.Reputation.AuditCount = totalAuditCount
+
+	uptimeAlpha, uptimeBeta, totalUptimeCount := updateReputation(
+		request.IsUp,
+		dossier.Reputation.UptimeReputationAlpha,
+		dossier.Reputation.UptimeReputationBeta,
+		request.UptimeLambda,
+		request.UptimeWeight,
+		dossier.Reputation.UptimeCount,
+	)
+	dossier.Reputation.UptimeReputationAlpha = uptimeAlpha
+	dossier.Reputation.UptimeReputationBeta = uptimeBeta
+	dossier.Reputation.UptimeCount = totalUptimeCount
+
+	now := time.Now()
+
+	auditRep := auditAlpha / (auditAlpha + auditBeta)
+	if auditRep <= request.AuditDQ {
+		dossier.Reputation.Disqualified = &now
+	}
+
+	uptimeRep := uptimeAlpha / (uptimeAlpha + uptimeBeta)
+	if uptimeRep <= request.UptimeDQ {
+		// n.b. that this will overwrite the audit DQ timestamp
+		// if it has already been set.
+		dossier.Reputation.Disqualified = &now
+	}
+
+	if request.IsUp {
+		dossier.Reputation.UptimeSuccessCount++
+		dossier.Reputation.LastContactSuccess = now
+	} else {
+		dossier.Reputation.LastContactFailure = now
+	}
+	if request.AuditSuccess {
+		dossier.Reputation.AuditSuccessCount++
+	}
+
+	// Updating node stats always exits it from containment mode
+	dossier.Contained = false
+	// !!!!!
+	// TODO: Cleanup containment table too
+	// !!!!!
+
+	return dossier._nodeStats(), nil
 }
 
 // UpdateUptime updates a single storagenode's uptime stats.
@@ -181,9 +282,8 @@ func (db *Inmemory) UpdateUptime(ctx context.Context, nodeID storj.NodeID, isUp 
 	)
 	dossier.Reputation.UptimeReputationAlpha = uptimeAlpha
 	dossier.Reputation.UptimeReputationBeta = uptimeBeta
-	dossier.Reputation.UptimeCount = totalUptimeCount 
+	dossier.Reputation.UptimeCount = totalUptimeCount
 
-	
 	uptimeRep := uptimeAlpha / (uptimeAlpha + uptimeBeta)
 	if uptimeRep <= uptimeDQ {
 		now := time.Now()
@@ -202,6 +302,29 @@ func (db *Inmemory) UpdateUptime(ctx context.Context, nodeID storj.NodeID, isUp 
 func (dossier *NodeProtectedDossier) _nodeStats() *NodeStats {
 	clone := dossier.Reputation
 	return &clone
+}
+
+func (dossier *NodeProtectedDossier) _dossier() *NodeDossier {
+	out := &NodeDossier{}
+	out.Id = dossier.ID
+	out.LastIp = dossier.LastNet
+	out.Address = &pb.NodeAddress{
+		Transport: dossier.Transport,
+		Address:   dossier.Address,
+	}
+	out.Type = dossier.Type
+	out.Operator = pb.NodeOperator{
+		Email:  dossier.Email,
+		Wallet: dossier.Wallet,
+	}
+	out.Capacity.FreeBandwidth = dossier.FreeBandwidth
+	out.Capacity.FreeDisk = dossier.FreeDisk
+	out.Reputation = dossier.Reputation
+	out.Version = dossier.Version // TODO: clone
+	out.Contained = dossier.Contained
+	out.Disqualified = dossier.Reputation.Disqualified
+
+	return out
 }
 
 // updateReputation uses the Beta distribution model to determine a node's reputation.
