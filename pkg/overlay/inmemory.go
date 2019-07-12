@@ -14,42 +14,34 @@ import (
 
 // Inmemory implements inmemory database for overlay.Cache
 type Inmemory struct {
-	mu     sync.RWMutex
-	nodes  []*NodeInfo
-	lookup map[storj.NodeID]*NodeInfo
+	mu       sync.RWMutex
+	nodes    []*NodeProtectedDossier
+	lookupID map[storj.NodeID]*NodeProtectedDossier
 }
 
-// NodeInfo blah
-type NodeInfo struct {
-	ID storj.NodeID
+// NodeProtectedDossier blah
+type NodeProtectedDossier struct {
+	sync.RWMutex
 
-	Address       string
-	LastNet       string
-	Protocol      pb.NodeTransport
-	Type          pb.NodeType
-	Email         string
-	Wallet        string
+	ID        storj.NodeID
+	Transport pb.NodeTransport
+	Type      pb.NodeType
+
+	Address string
+	LastNet string
+
+	// Operator
+	Email  string
+	Wallet string
+
+	// Capacity
 	FreeBandwidth int64
 	FreeDisk      int64
 
-	LastContactSuccess time.Time
-	LastContactFailure time.Time
+	Reputation NodeStats
 
-	AuditSuccessCount  int64
-	TotalAuditCount    int64
-	UptimeSuccessCount int64
-	TotalUptimeCount   int64
-
-	AuditReputationAlpha  float64
-	AuditReputationBeta   float64
-	UptimeReputationAlpha float64
-	UptimeReputationBeta  float64
-
-	Contained bool
-
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Disqualified time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 
 	Version pb.NodeVersion
 }
@@ -86,17 +78,69 @@ func (db *Inmemory) Reliable(context.Context, *NodeCriteria) (storj.NodeIDList, 
 
 // Paginate will page through the database nodes
 func (db *Inmemory) Paginate(ctx context.Context, offset int64, limit int) ([]*NodeDossier, bool, error) {
-	return nil, nil
+	return nil, false, nil
 }
 
 // IsVetted returns whether or not the node reaches reputable thresholds
 func (db *Inmemory) IsVetted(ctx context.Context, id storj.NodeID, criteria *NodeCriteria) (bool, error) {
-	return nil, nil
+	return false, nil
+}
+
+func (db *Inmemory) lookup(ctx context.Context, id storj.NodeID) *NodeProtectedDossier {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	return db.lookupID[id]
+}
+
+// must hold write lock
+func (db *Inmemory) _add(ctx context.Context, dossier *NodeProtectedDossier) *NodeProtectedDossier {
+	db.lookupID[dossier.ID] = dossier
+	// TODO: insert sorted
+	db.nodes = append(db.nodes, dossier)
+	return dossier
 }
 
 // UpdateAddress updates node address
-func (db *Inmemory) UpdateAddress(ctx context.Context, value *pb.Node, defaults NodeSelectionConfig) error {
-	return nil, nil
+func (db *Inmemory) UpdateAddress(ctx context.Context, info *pb.Node, defaults NodeSelectionConfig) error {
+	if info == nil || info.Id.IsZero() {
+		return ErrEmptyNode
+	}
+
+	// fast path
+	if dossier := db.lookup(ctx, info.Id); dossier != nil {
+		dossier.Lock()
+		defer dossier.Unlock()
+
+		dossier.Address = info.Address.Address
+		dossier.Transport = info.Address.Transport
+		dossier.LastNet = info.LastIp
+		return nil
+	}
+
+	now := time.Now()
+
+	db.mu.Lock()
+	defer db.mu.Lock()
+
+	db._add(ctx, &NodeProtectedDossier{
+		ID:            info.Id,
+		Address:       info.Address.Address,
+		Transport:     info.Address.Transport,
+		LastNet:       info.LastIp,
+		Type:          pb.NodeType_INVALID,
+		FreeBandwidth: -1,
+		FreeDisk:      -1,
+		Reputation: NodeStats{
+			LastContactSuccess: now,
+
+			AuditReputationAlpha:  defaults.AuditReputationAlpha0,
+			AuditReputationBeta:   defaults.AuditReputationBeta0,
+			UptimeReputationAlpha: defaults.UptimeReputationAlpha0,
+			UptimeReputationBeta:  defaults.UptimeReputationBeta0,
+		},
+	})
+
+	return nil
 }
 
 // UpdateStats all parts of single storagenode's stats.
@@ -111,5 +155,65 @@ func (db *Inmemory) UpdateNodeInfo(ctx context.Context, node storj.NodeID, nodeI
 
 // UpdateUptime updates a single storagenode's uptime stats.
 func (db *Inmemory) UpdateUptime(ctx context.Context, nodeID storj.NodeID, isUp bool, lambda, weight, uptimeDQ float64) (stats *NodeStats, err error) {
-	return nil, nil
+	if nodeID.IsZero() {
+		return nil, ErrEmptyNode
+	}
+
+	dossier := db.lookup(ctx, nodeID)
+	if dossier == nil {
+		return nil, ErrNodeNotFound.New("%s", nodeID)
+	}
+
+	dossier.Lock()
+	defer dossier.Unlock()
+
+	if dossier.Reputation.Disqualified != nil {
+		return dossier._nodeStats(), nil
+	}
+
+	uptimeAlpha, uptimeBeta, totalUptimeCount := updateReputation(
+		isUp,
+		dossier.Reputation.UptimeReputationAlpha,
+		dossier.Reputation.UptimeReputationBeta,
+		lambda,
+		weight,
+		dossier.Reputation.UptimeCount,
+	)
+	dossier.Reputation.UptimeReputationAlpha = uptimeAlpha
+	dossier.Reputation.UptimeReputationBeta = uptimeBeta
+	dossier.Reputation.UptimeCount = totalUptimeCount 
+
+	
+	uptimeRep := uptimeAlpha / (uptimeAlpha + uptimeBeta)
+	if uptimeRep <= uptimeDQ {
+		now := time.Now()
+		dossier.Reputation.Disqualified = &now
+	}
+	if isUp {
+		dossier.Reputation.UptimeSuccessCount++
+		dossier.Reputation.LastContactSuccess = time.Now()
+	} else {
+		dossier.Reputation.LastContactFailure = time.Now()
+	}
+
+	return dossier._nodeStats(), nil
+}
+
+func (dossier *NodeProtectedDossier) _nodeStats() *NodeStats {
+	clone := dossier.Reputation
+	return &clone
+}
+
+// updateReputation uses the Beta distribution model to determine a node's reputation.
+// lambda is the "forgetting factor" which determines how much past info is kept when determining current reputation score.
+// w is the normalization weight that affects how severely new updates affect the current reputation distribution.
+func updateReputation(isSuccess bool, alpha, beta, lambda, w float64, totalCount int64) (newAlpha, newBeta float64, updatedCount int64) {
+	// v is a single feedback value that allows us to update both alpha and beta
+	var v float64 = -1
+	if isSuccess {
+		v = 1
+	}
+	newAlpha = lambda*alpha + w*(1+v)/2
+	newBeta = lambda*beta + w*(1-v)/2
+	return newAlpha, newBeta, totalCount + 1
 }

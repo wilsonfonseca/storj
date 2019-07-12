@@ -120,18 +120,22 @@ type NodeDossier struct {
 
 // NodeStats contains statistics about a node.
 type NodeStats struct {
-	Latency90             int64
-	AuditSuccessCount     int64
-	AuditCount            int64
-	UptimeSuccessCount    int64
-	UptimeCount           int64
-	LastContactSuccess    time.Time
-	LastContactFailure    time.Time
+	Latency90 int64
+
+	AuditSuccessCount  int64
+	AuditCount         int64
+	UptimeSuccessCount int64
+	UptimeCount        int64
+
+	LastContactSuccess time.Time
+	LastContactFailure time.Time
+
 	AuditReputationAlpha  float64
 	UptimeReputationAlpha float64
 	AuditReputationBeta   float64
 	UptimeReputationBeta  float64
-	Disqualified          *time.Time
+
+	Disqualified *time.Time
 }
 
 // Cache is used to store and handle node information
