@@ -97,12 +97,12 @@ func (ec *ecClient) Put(ctx context.Context, limits []*pb.AddressedOrderLimit, r
 	}
 	infos := make(chan info, len(limits))
 
-	psCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// psCtx, cancel := context.WithCancel(ctx)
+	// defer cancel()
 
 	for i, addressedLimit := range limits {
 		go func(i int, addressedLimit *pb.AddressedOrderLimit) {
-			hash, err := ec.putPiece(psCtx, ctx, addressedLimit, readers[i], expiration)
+			hash, err := ec.putPiece(context.TODO(), ctx, addressedLimit, readers[i], expiration)
 			infos <- info{i: i, err: err, hash: hash}
 		}(i, addressedLimit)
 	}
@@ -131,10 +131,10 @@ func (ec *ecClient) Put(ctx context.Context, limits []*pb.AddressedOrderLimit, r
 
 		atomic.AddInt32(&successfulCount, 1)
 
-		if int(successfulCount) >= rs.OptimalThreshold() {
-			ec.log.Sugar().Infof("Success threshold (%d nodes) reached. Cancelling remaining uploads.", rs.OptimalThreshold())
-			cancel()
-		}
+		// if int(successfulCount) >= rs.OptimalThreshold() {
+		// 	ec.log.Sugar().Infof("Success threshold (%d nodes) reached. Cancelling remaining uploads.", rs.OptimalThreshold())
+		// 	cancel()
+		// }
 	}
 
 	defer func() {
