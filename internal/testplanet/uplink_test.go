@@ -28,8 +28,8 @@ import (
 )
 
 func TestUplinksParallel(t *testing.T) {
-	const uplinkCount = 10
-	const parallelCount = 15
+	const uplinkCount = 20
+	const parallelCount = 35
 
 	testplanet.Run(t, testplanet.Config{
 		SatelliteCount: 1, StorageNodeCount: 6, UplinkCount: uplinkCount,
