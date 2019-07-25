@@ -193,7 +193,7 @@ func (ec *ecClient) Repair(ctx context.Context, limits []*pb.AddressedOrderLimit
 		}(i, addressedLimit)
 	}
 
-	ec.log.Sugar().Infof("Starting a timer for %s for repairing %s to %d nodes to reach at least the success threshold (%d nodes)...",
+	ec.log.Sugar().Infof("Starting a timer for %s for repairing %s up to %d nodes to try to have a number of pieces around the successful threshold (%d)",
 		timeout, path, nonNilCount(limits), rs.OptimalThreshold())
 
 	var successfulCount int32
@@ -343,10 +343,11 @@ func (ec *ecClient) Get(ctx context.Context, limits []*pb.AddressedOrderLimit, p
 
 	rr, err = eestream.Decode(rrs, es, ec.memoryLimit, ec.forceErrorDetection)
 	if err != nil {
-		return nil, err
+		return nil, Error.Wrap(err)
 	}
 
-	return eestream.Unpad(rr, int(paddedSize-size))
+	ranger, err := eestream.Unpad(rr, int(paddedSize-size))
+	return ranger, Error.Wrap(err)
 }
 
 func (ec *ecClient) Delete(ctx context.Context, limits []*pb.AddressedOrderLimit, privateKey storj.PiecePrivateKey) (err error) {

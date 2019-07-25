@@ -25,6 +25,7 @@ import (
 	"storj.io/storj/satellite"
 	"storj.io/storj/satellite/console"
 	"storj.io/storj/satellite/console/consoleweb"
+	"storj.io/storj/satellite/gc"
 	"storj.io/storj/satellite/mailservice"
 	"storj.io/storj/satellite/marketingweb"
 	"storj.io/storj/satellite/metainfo"
@@ -124,9 +125,10 @@ func (planet *Planet) newSatellites(count int) ([]*satellite.Peer, error) {
 				},
 			},
 			Discovery: discovery.Config{
-				DiscoveryInterval: 1 * time.Second,
-				RefreshInterval:   1 * time.Second,
-				RefreshLimit:      100,
+				DiscoveryInterval:  1 * time.Second,
+				RefreshInterval:    1 * time.Second,
+				RefreshLimit:       100,
+				RefreshConcurrency: 2,
 			},
 			Metainfo: metainfo.Config{
 				DatabaseURL:          "bolt://" + filepath.Join(storageDir, "pointers.db"),
@@ -143,6 +145,9 @@ func (planet *Planet) newSatellites(count int) ([]*satellite.Peer, error) {
 					MaxThreshold:     (planet.config.StorageNodeCount * 4 / 5),
 					Validate:         false,
 				},
+				Loop: metainfo.LoopConfig{
+					CoalesceDuration: 5 * time.Second,
+				},
 			},
 			Orders: orders.Config{
 				Expiration: 7 * 24 * time.Hour,
@@ -153,16 +158,24 @@ func (planet *Planet) newSatellites(count int) ([]*satellite.Peer, error) {
 				ReliabilityCacheStaleness: 5 * time.Minute,
 			},
 			Repairer: repairer.Config{
-				MaxRepair:    10,
-				Interval:     time.Hour,
-				Timeout:      1 * time.Minute, // Repairs can take up to 10 seconds. Leaving room for outliers
-				MaxBufferMem: 4 * memory.MiB,
+				MaxRepair:                     10,
+				Interval:                      time.Hour,
+				Timeout:                       1 * time.Minute, // Repairs can take up to 10 seconds. Leaving room for outliers
+				MaxBufferMem:                  4 * memory.MiB,
+				MaxExcessRateOptimalThreshold: 0.05,
 			},
 			Audit: audit.Config{
 				MaxRetriesStatDB:   0,
 				Interval:           30 * time.Second,
 				MinBytesPerSecond:  1 * memory.KB,
 				MinDownloadTimeout: 5 * time.Second,
+			},
+			GarbageCollection: gc.Config{
+				Interval:          1 * time.Minute,
+				Enabled:           true,
+				InitialPieces:     10,
+				FalsePositiveRate: 0.1,
+				ConcurrentSends:   1,
 			},
 			Tally: tally.Config{
 				Interval: 30 * time.Second,

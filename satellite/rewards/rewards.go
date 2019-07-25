@@ -10,12 +10,14 @@ import (
 	"storj.io/storj/internal/currency"
 )
 
+// MaxRedemptionErr is the error message used when an offer has reached its redemption capacity
+var MaxRedemptionErr = "This offer redemption has reached its capacity"
+
 // DB holds information about offer
 type DB interface {
 	ListAll(ctx context.Context) (Offers, error)
 	GetCurrentByType(ctx context.Context, offerType OfferType) (*Offer, error)
 	Create(ctx context.Context, offer *NewOffer) (*Offer, error)
-	Redeem(ctx context.Context, offerID int, isDefault bool) error
 	Finish(ctx context.Context, offerID int) error
 }
 
@@ -55,6 +57,8 @@ const (
 	FreeCredit = OfferType(1)
 	// Referral is a type of offers used for Referral Program
 	Referral = OfferType(2)
+	// Partner is a type of offers used for Open Source Partner Program
+	Partner = OfferType(3)
 )
 
 // OfferStatus represents the different stage an offer can have in its life-cycle.
@@ -85,7 +89,6 @@ type Offer struct {
 	InviteeCreditDurationDays int
 
 	RedeemableCap int
-	NumRedeemed   int
 
 	ExpiresAt time.Time
 	CreatedAt time.Time

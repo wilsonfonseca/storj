@@ -55,6 +55,8 @@ type DB interface {
 	Reliable(context.Context, *NodeCriteria) (storj.NodeIDList, error)
 	// Paginate will page through the database nodes
 	Paginate(ctx context.Context, offset int64, limit int) ([]*NodeDossier, bool, error)
+	// PaginateQualified will page through the qualified nodes
+	PaginateQualified(ctx context.Context, offset int64, limit int) ([]*pb.Node, bool, error)
 	// IsVetted returns whether or not the node reaches reputable thresholds
 	IsVetted(ctx context.Context, id storj.NodeID, criteria *NodeCriteria) (bool, error)
 	// Update updates node address
@@ -170,6 +172,12 @@ func (cache *Cache) Paginate(ctx context.Context, offset int64, limit int) (_ []
 	return cache.db.Paginate(ctx, offset, limit)
 }
 
+// PaginateQualified returns a list of `limit` qualified nodes starting from `start` offset.
+func (cache *Cache) PaginateQualified(ctx context.Context, offset int64, limit int) (_ []*pb.Node, _ bool, err error) {
+	defer mon.Task()(&ctx)(&err)
+	return cache.db.PaginateQualified(ctx, offset, limit)
+}
+
 // Get looks up the provided nodeID from the overlay cache
 func (cache *Cache) Get(ctx context.Context, nodeID storj.NodeID) (_ *NodeDossier, err error) {
 	defer mon.Task()(&ctx)(&err)
@@ -221,7 +229,7 @@ func (cache *Cache) FindStorageNodesWithPreferences(ctx context.Context, req Fin
 			DistinctIP:     preferences.DistinctIP,
 		})
 		if err != nil {
-			return nil, err
+			return nil, OverlayError.Wrap(err)
 		}
 	}
 
@@ -247,7 +255,7 @@ func (cache *Cache) FindStorageNodesWithPreferences(ctx context.Context, req Fin
 	}
 	reputableNodes, err := cache.db.SelectStorageNodes(ctx, reputableNodeCount-len(newNodes), &criteria)
 	if err != nil {
-		return nil, err
+		return nil, OverlayError.Wrap(err)
 	}
 
 	nodes = append(nodes, newNodes...)

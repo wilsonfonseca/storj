@@ -12,6 +12,7 @@ import (
 	"github.com/zeebo/errs"
 	"go.uber.org/zap"
 
+	"storj.io/storj/pkg/macaroon"
 	"storj.io/storj/pkg/pb"
 	"storj.io/storj/pkg/storage/meta"
 	"storj.io/storj/pkg/storj"
@@ -39,14 +40,14 @@ func (s *Service) Put(ctx context.Context, path string, pointer *pb.Pointer) (er
 
 	pointerBytes, err := proto.Marshal(pointer)
 	if err != nil {
-		return err
+		return Error.Wrap(err)
 	}
 
 	// TODO(kaloyan): make sure that we know we are overwriting the pointer!
 	// In such case we should delete the pieces of the old segment if it was
 	// a remote one.
 	if err = s.DB.Put(ctx, []byte(path), pointerBytes); err != nil {
-		return err
+		return Error.Wrap(err)
 	}
 
 	return nil
@@ -181,6 +182,12 @@ func (s *Service) GetBucket(ctx context.Context, bucketName []byte, projectID uu
 	return s.bucketsDB.GetBucket(ctx, bucketName, projectID)
 }
 
+// UpdateBucket returns an updated bucket in the buckets db
+func (s *Service) UpdateBucket(ctx context.Context, bucket storj.Bucket) (_ storj.Bucket, err error) {
+	defer mon.Task()(&ctx)(&err)
+	return s.bucketsDB.UpdateBucket(ctx, bucket)
+}
+
 // DeleteBucket deletes a bucket from the bucekts db
 func (s *Service) DeleteBucket(ctx context.Context, bucketName []byte, projectID uuid.UUID) (err error) {
 	defer mon.Task()(&ctx)(&err)
@@ -188,7 +195,7 @@ func (s *Service) DeleteBucket(ctx context.Context, bucketName []byte, projectID
 }
 
 // ListBuckets returns a list of buckets for a project
-func (s *Service) ListBuckets(ctx context.Context, projectID uuid.UUID, listOpts storj.BucketListOptions, allowedBuckets map[string]struct{}) (bucketList storj.BucketList, err error) {
+func (s *Service) ListBuckets(ctx context.Context, projectID uuid.UUID, listOpts storj.BucketListOptions, allowedBuckets macaroon.AllowedBuckets) (bucketList storj.BucketList, err error) {
 	defer mon.Task()(&ctx)(&err)
 	return s.bucketsDB.ListBuckets(ctx, projectID, listOpts, allowedBuckets)
 }

@@ -158,13 +158,20 @@ func (p *Project) OpenBucket(ctx context.Context, bucketName string, access *Enc
 	}
 
 	// partnerID set and bucket's attribution is not set
-	if p.uplinkCfg.Volatile.PartnerID != "" && bucketInfo.Attribution == "" {
+	if p.uplinkCfg.Volatile.PartnerID != "" && bucketInfo.PartnerID.IsZero() {
+		// make an entry into the attribution table
 		err = p.checkBucketAttribution(ctx, bucketName)
 		if err != nil {
 			return nil, err
 		}
 
-		// update the bucket with attribution info
+		partnerID, err := uuid.Parse(p.uplinkCfg.Volatile.PartnerID)
+		if err != nil {
+			return nil, Error.Wrap(err)
+		}
+
+		// update the bucket metainfo table with corresponding partner info
+		bucketInfo.PartnerID = *partnerID
 		bucketInfo, err = p.updateBucket(ctx, bucketInfo)
 		if err != nil {
 			return nil, err
@@ -252,7 +259,8 @@ func (p *Project) updateBucket(ctx context.Context, bucketInfo storj.Bucket) (bu
 	defer mon.Task()(&ctx)(&err)
 
 	bucket = storj.Bucket{
-		Attribution:                 p.uplinkCfg.Volatile.PartnerID,
+		Name:                        bucketInfo.Name,
+		PartnerID:                   bucketInfo.PartnerID,
 		PathCipher:                  bucketInfo.PathCipher,
 		DefaultEncryptionParameters: bucketInfo.DefaultEncryptionParameters,
 		DefaultRedundancyScheme:     bucketInfo.DefaultRedundancyScheme,
