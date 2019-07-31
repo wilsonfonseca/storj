@@ -93,9 +93,9 @@ func (client *Client) nextAllocationStep(previous int64) int64 {
 }
 
 // ignoreEOF is an utility func for ignoring EOF error, when it's not important.
-func ignoreEOF(ctx context.Context, err error) error {
+func ignoreEOF(err error) error {
 	if err == io.EOF {
-		return ctx.Err()
+		return nil
 	}
 	return err
 }

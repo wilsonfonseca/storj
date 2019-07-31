@@ -67,9 +67,6 @@ func (client *Client) Upload(ctx context.Context, limit *pb.OrderLimit, piecePri
 	})
 	if err != nil {
 		_, closeErr := stream.CloseAndRecv()
-<<<<<<< HEAD
-		return nil, ErrProtocol.Wrap(errs.Combine(ignoreEOF(ctx, err), ignoreEOF(ctx, closeErr)))
-=======
 		switch {
 		case err != io.EOF && closeErr != nil:
 			err = ErrProtocol.Wrap(errs.Combine(err, closeErr))
@@ -78,7 +75,6 @@ func (client *Client) Upload(ctx context.Context, limit *pb.OrderLimit, piecePri
 		}
 
 		return nil, err
->>>>>>> master
 	}
 
 	upload := &Upload{
@@ -149,9 +145,6 @@ func (client *Upload) Write(data []byte) (written int, err error) {
 			},
 		})
 		if err != nil {
-<<<<<<< HEAD
-			err = ErrProtocol.Wrap(ignoreEOF(ctx, err))
-=======
 			_, closeErr := client.stream.CloseAndRecv()
 			switch {
 			case err != io.EOF && closeErr != nil:
@@ -160,7 +153,6 @@ func (client *Upload) Write(data []byte) (written int, err error) {
 				err = ErrProtocol.Wrap(closeErr)
 			}
 
->>>>>>> master
 			client.sendError = err
 			return written, err
 		}
@@ -212,7 +204,7 @@ func (client *Upload) Commit(ctx context.Context) (_ *pb.PieceHash, err error) {
 		// failed to sign, let's close the sending side, no need to wait for a response
 		closeErr := client.stream.CloseSend()
 		// closeErr being io.EOF doesn't inform us about anything
-		return nil, Error.Wrap(errs.Combine(ignoreEOF(client.ctx, err), ignoreEOF(ctx, closeErr)))
+		return nil, Error.Wrap(errs.Combine(err, ignoreEOF(closeErr)))
 	}
 
 	// exchange signed piece hashes
@@ -227,7 +219,7 @@ func (client *Upload) Commit(ctx context.Context) (_ *pb.PieceHash, err error) {
 		// combine all the errors from before
 		// sendErr is io.EOF when failed to send, so don't care
 		// closeErr is io.EOF when storage node closed before sending us a response
-		return nil, errs.Combine(ErrProtocol.New("expected piece hash"), ignoreEOF(ctx, sendErr), ignoreEOF(ctx, closeErr))
+		return nil, errs.Combine(ErrProtocol.New("expected piece hash"), ignoreEOF(sendErr), ignoreEOF(closeErr))
 	}
 
 	// verification
@@ -236,5 +228,5 @@ func (client *Upload) Commit(ctx context.Context) (_ *pb.PieceHash, err error) {
 	// combine all the errors from before
 	// sendErr is io.EOF when we failed to send
 	// closeErr is io.EOF when storage node closed properly
-	return response.Done, errs.Combine(verifyErr, ignoreEOF(ctx, sendErr), ignoreEOF(ctx, closeErr))
+	return response.Done, errs.Combine(verifyErr, ignoreEOF(sendErr), ignoreEOF(closeErr))
 }
