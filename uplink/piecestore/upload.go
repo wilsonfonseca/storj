@@ -11,10 +11,11 @@ import (
 	"github.com/zeebo/errs"
 	monkit "gopkg.in/spacemonkeygo/monkit.v2"
 
-	"storj.io/storj/pkg/auth/signing"
 	"storj.io/storj/pkg/identity"
 	"storj.io/storj/pkg/pb"
 	"storj.io/storj/pkg/pkcrypto"
+	"storj.io/storj/pkg/signing"
+	"storj.io/storj/pkg/storj"
 )
 
 var mon = monkit.Package()
@@ -31,11 +32,12 @@ type Uploader interface {
 
 // Upload implements uploading to the storage node.
 type Upload struct {
-	client *Client
-	limit  *pb.OrderLimit
-	peer   *identity.PeerIdentity
-	stream pb.Piecestore_UploadClient
-	ctx    context.Context
+	client     *Client
+	limit      *pb.OrderLimit
+	privateKey storj.PiecePrivateKey
+	peer       *identity.PeerIdentity
+	stream     pb.Piecestore_UploadClient
+	ctx        context.Context
 
 	hash           hash.Hash // TODO: use concrete implementation
 	offset         int64
@@ -47,7 +49,7 @@ type Upload struct {
 }
 
 // Upload initiates an upload to the storage node.
-func (client *Client) Upload(ctx context.Context, limit *pb.OrderLimit) (_ Uploader, err error) {
+func (client *Client) Upload(ctx context.Context, limit *pb.OrderLimit, piecePrivateKey storj.PiecePrivateKey) (_ Uploader, err error) {
 	defer mon.Task()(&ctx, "node: "+limit.StorageNodeId.String()[0:8])(&err)
 
 	stream, err := client.client.Upload(ctx)
@@ -65,15 +67,27 @@ func (client *Client) Upload(ctx context.Context, limit *pb.OrderLimit) (_ Uploa
 	})
 	if err != nil {
 		_, closeErr := stream.CloseAndRecv()
+<<<<<<< HEAD
 		return nil, ErrProtocol.Wrap(errs.Combine(ignoreEOF(ctx, err), ignoreEOF(ctx, closeErr)))
+=======
+		switch {
+		case err != io.EOF && closeErr != nil:
+			err = ErrProtocol.Wrap(errs.Combine(err, closeErr))
+		case closeErr != nil:
+			err = ErrProtocol.Wrap(closeErr)
+		}
+
+		return nil, err
+>>>>>>> master
 	}
 
 	upload := &Upload{
-		client: client,
-		limit:  limit,
-		peer:   peer,
-		stream: stream,
-		ctx:    ctx,
+		client:     client,
+		limit:      limit,
+		privateKey: piecePrivateKey,
+		peer:       peer,
+		stream:     stream,
+		ctx:        ctx,
 
 		hash:           pkcrypto.NewHash(),
 		offset:         0,
@@ -118,7 +132,7 @@ func (client *Upload) Write(data []byte) (written int, err error) {
 		}
 
 		// create a signed order for the next chunk
-		order, err := signing.SignOrder(ctx, client.client.signer, &pb.Order{
+		order, err := signing.SignUplinkOrder(ctx, client.privateKey, &pb.Order{
 			SerialNumber: client.limit.SerialNumber,
 			Amount:       client.offset + int64(len(sendData)),
 		})
@@ -135,7 +149,18 @@ func (client *Upload) Write(data []byte) (written int, err error) {
 			},
 		})
 		if err != nil {
+<<<<<<< HEAD
 			err = ErrProtocol.Wrap(ignoreEOF(ctx, err))
+=======
+			_, closeErr := client.stream.CloseAndRecv()
+			switch {
+			case err != io.EOF && closeErr != nil:
+				err = ErrProtocol.Wrap(errs.Combine(err, closeErr))
+			case closeErr != nil:
+				err = ErrProtocol.Wrap(closeErr)
+			}
+
+>>>>>>> master
 			client.sendError = err
 			return written, err
 		}
@@ -177,9 +202,11 @@ func (client *Upload) Commit(ctx context.Context) (_ *pb.PieceHash, err error) {
 	}
 
 	// sign the hash for storage node
-	uplinkHash, err := signing.SignPieceHash(ctx, client.client.signer, &pb.PieceHash{
-		PieceId: client.limit.PieceId,
-		Hash:    client.hash.Sum(nil),
+	uplinkHash, err := signing.SignUplinkPieceHash(ctx, client.privateKey, &pb.PieceHash{
+		PieceId:   client.limit.PieceId,
+		PieceSize: client.offset,
+		Hash:      client.hash.Sum(nil),
+		Timestamp: client.limit.OrderCreation,
 	})
 	if err != nil {
 		// failed to sign, let's close the sending side, no need to wait for a response

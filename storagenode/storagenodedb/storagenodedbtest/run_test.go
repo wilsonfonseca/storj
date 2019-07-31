@@ -16,8 +16,8 @@ import (
 	"storj.io/storj/internal/testcontext"
 	"storj.io/storj/internal/testidentity"
 	"storj.io/storj/internal/testrand"
-	"storj.io/storj/pkg/auth/signing"
 	"storj.io/storj/pkg/pb"
+	"storj.io/storj/pkg/signing"
 	"storj.io/storj/pkg/storj"
 	"storj.io/storj/storagenode"
 	"storj.io/storj/storagenode/orders"
@@ -55,7 +55,7 @@ func TestInMemoryConcurrency(t *testing.T) {
 
 	log := zaptest.NewLogger(t)
 
-	db, err := storagenodedb.NewInMemory(log, ctx.Dir("storage"))
+	db, err := storagenodedb.NewTest(log, ctx.Dir("storage"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,22 +129,22 @@ func createOrders(t *testing.T, ctx *testcontext.Context, orders map[string]orde
 	}
 	return nil
 }
+
 func createOrder(t *testing.T, ctx *testcontext.Context) (info *orders.Info) {
-
 	storageNodeIdentity := testidentity.MustPregeneratedSignedIdentity(0, storj.LatestIDVersion())
-
 	satelliteIdentity := testidentity.MustPregeneratedSignedIdentity(1, storj.LatestIDVersion())
 
-	uplink := testidentity.MustPregeneratedSignedIdentity(3, storj.LatestIDVersion())
-	piece := storj.NewPieceID()
+	piecePublicKey, piecePrivateKey, err := storj.NewPieceKey()
+	require.NoError(t, err)
 
+	piece := testrand.PieceID()
 	serialNumber := testrand.SerialNumber()
 	expiration := time.Now()
 
 	limit, err := signing.SignOrderLimit(ctx, signing.SignerFromFullIdentity(satelliteIdentity), &pb.OrderLimit{
 		SerialNumber:    serialNumber,
 		SatelliteId:     satelliteIdentity.ID,
-		UplinkId:        uplink.ID,
+		UplinkPublicKey: piecePublicKey,
 		StorageNodeId:   storageNodeIdentity.ID,
 		PieceId:         piece,
 		Limit:           100,
@@ -154,7 +154,7 @@ func createOrder(t *testing.T, ctx *testcontext.Context) (info *orders.Info) {
 	})
 	require.NoError(t, err)
 
-	order, err := signing.SignOrder(ctx, signing.SignerFromFullIdentity(uplink), &pb.Order{
+	order, err := signing.SignUplinkOrder(ctx, piecePrivateKey, &pb.Order{
 		SerialNumber: serialNumber,
 		Amount:       50,
 	})

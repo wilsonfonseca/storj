@@ -13,16 +13,13 @@ import (
 	monkit "gopkg.in/spacemonkeygo/monkit.v2"
 
 	"storj.io/storj/internal/memory"
-	"storj.io/storj/pkg/identity"
 	"storj.io/storj/pkg/pb"
 	"storj.io/storj/pkg/storj"
 	"storj.io/storj/storage"
 )
 
 const (
-	readBufferSize  = 256 * memory.KiB
-	writeBufferSize = 256 * memory.KiB
-	preallocSize    = 4 * memory.MiB
+	preallocSize = 4 * memory.MiB
 )
 
 var (
@@ -41,8 +38,8 @@ type Info struct {
 	PieceCreation   time.Time
 	PieceExpiration time.Time
 
+	OrderLimit      *pb.OrderLimit
 	UplinkPieceHash *pb.PieceHash
-	Uplink          *identity.PeerIdentity
 }
 
 // ExpiredInfo is a fully namespaced piece id
@@ -99,7 +96,7 @@ func (store *Store) Writer(ctx context.Context, satellite storj.NodeID, pieceID 
 		return nil, Error.Wrap(err)
 	}
 
-	writer, err := NewWriter(blob, writeBufferSize.Int())
+	writer, err := NewWriter(blob)
 	return writer, Error.Wrap(err)
 }
 
@@ -117,7 +114,7 @@ func (store *Store) Reader(ctx context.Context, satellite storj.NodeID, pieceID 
 		return nil, Error.Wrap(err)
 	}
 
-	reader, err := NewReader(blob, readBufferSize.Int())
+	reader, err := NewReader(blob)
 	return reader, Error.Wrap(err)
 }
 

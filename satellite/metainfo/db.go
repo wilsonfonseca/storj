@@ -8,6 +8,7 @@ import (
 
 	"github.com/skyrings/skyring-common/tools/uuid"
 
+	"storj.io/storj/pkg/macaroon"
 	"storj.io/storj/pkg/storj"
 )
 
@@ -17,8 +18,10 @@ type BucketsDB interface {
 	CreateBucket(ctx context.Context, bucket storj.Bucket) (_ storj.Bucket, err error)
 	// Get returns an existing bucket
 	GetBucket(ctx context.Context, bucketName []byte, projectID uuid.UUID) (bucket storj.Bucket, err error)
+	// UpdateBucket updates an existing bucket
+	UpdateBucket(ctx context.Context, bucket storj.Bucket) (_ storj.Bucket, err error)
 	// Delete deletes a bucket
 	DeleteBucket(ctx context.Context, bucketName []byte, projectID uuid.UUID) (err error)
 	// List returns all buckets for a project
-	ListBuckets(ctx context.Context, projectID uuid.UUID, listOpts storj.BucketListOptions, allowedBuckets map[string]struct{}) (bucketList storj.BucketList, err error)
+	ListBuckets(ctx context.Context, projectID uuid.UUID, listOpts storj.BucketListOptions, allowedBuckets macaroon.AllowedBuckets) (bucketList storj.BucketList, err error)
 }

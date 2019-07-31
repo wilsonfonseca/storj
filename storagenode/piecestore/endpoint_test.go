@@ -28,16 +28,17 @@ import (
 	"storj.io/storj/internal/testidentity"
 	"storj.io/storj/internal/testplanet"
 	"storj.io/storj/internal/testrand"
-	"storj.io/storj/pkg/auth/signing"
 	"storj.io/storj/pkg/bloomfilter"
 	"storj.io/storj/pkg/pb"
 	"storj.io/storj/pkg/pkcrypto"
+	"storj.io/storj/pkg/signing"
 	"storj.io/storj/pkg/storj"
 	"storj.io/storj/storagenode"
 	"storj.io/storj/storagenode/bandwidth"
 	"storj.io/storj/storagenode/pieces"
 	ps "storj.io/storj/storagenode/piecestore"
 	"storj.io/storj/storagenode/storagenodedb/storagenodedbtest"
+	"storj.io/storj/storagenode/trust"
 	"storj.io/storj/uplink/piecestore"
 )
 
@@ -65,7 +66,7 @@ func TestUploadAndPartialDownload(t *testing.T) {
 
 			download, cleanup, err := planet.Uplinks[0].DownloadStream(ctx, planet.Satellites[0], "testbucket", "test/path")
 			require.NoError(t, err)
-
+			defer ctx.Check(cleanup)
 			pos, err := download.Seek(tt.offset, io.SeekStart)
 			require.NoError(t, err)
 			assert.Equal(t, pos, tt.offset)
@@ -78,7 +79,6 @@ func TestUploadAndPartialDownload(t *testing.T) {
 			assert.Equal(t, expectedData[tt.offset:tt.offset+tt.size], data)
 
 			require.NoError(t, download.Close())
-			require.NoError(t, cleanup())
 		}
 
 		var totalBandwidthUsage bandwidth.Usage
@@ -145,10 +145,9 @@ func TestUpload(t *testing.T) {
 		expectedHash := pkcrypto.SHA256Hash(data)
 		serialNumber := testrand.SerialNumber()
 
-		orderLimit := GenerateOrderLimit(
+		orderLimit, piecePrivateKey := GenerateOrderLimit(
 			t,
 			planet.Satellites[0].ID(),
-			planet.Uplinks[0].ID(),
 			planet.StorageNodes[0].ID(),
 			tt.pieceID,
 			tt.action,
@@ -161,7 +160,7 @@ func TestUpload(t *testing.T) {
 		orderLimit, err = signing.SignOrderLimit(ctx, signer, orderLimit)
 		require.NoError(t, err)
 
-		uploader, err := client.Upload(ctx, orderLimit)
+		uploader, err := client.Upload(ctx, orderLimit, piecePrivateKey)
 		require.NoError(t, err)
 
 		_, err = uploader.Write(data)
@@ -200,10 +199,9 @@ func TestDownload(t *testing.T) {
 	expectedData := testrand.Bytes(10 * memory.KiB)
 	serialNumber := testrand.SerialNumber()
 
-	orderLimit := GenerateOrderLimit(
+	orderLimit, piecePrivateKey := GenerateOrderLimit(
 		t,
 		planet.Satellites[0].ID(),
-		planet.Uplinks[0].ID(),
 		planet.StorageNodes[0].ID(),
 		storj.PieceID{1},
 		pb.PieceAction_PUT,
@@ -216,7 +214,7 @@ func TestDownload(t *testing.T) {
 	orderLimit, err = signing.SignOrderLimit(ctx, signer, orderLimit)
 	require.NoError(t, err)
 
-	uploader, err := client.Upload(ctx, orderLimit)
+	uploader, err := client.Upload(ctx, orderLimit, piecePrivateKey)
 	require.NoError(t, err)
 
 	_, err = uploader.Write(expectedData)
@@ -247,10 +245,9 @@ func TestDownload(t *testing.T) {
 	} {
 		serialNumber := testrand.SerialNumber()
 
-		orderLimit := GenerateOrderLimit(
+		orderLimit, piecePrivateKey := GenerateOrderLimit(
 			t,
 			planet.Satellites[0].ID(),
-			planet.Uplinks[0].ID(),
 			planet.StorageNodes[0].ID(),
 			tt.pieceID,
 			tt.action,
@@ -263,7 +260,7 @@ func TestDownload(t *testing.T) {
 		orderLimit, err = signing.SignOrderLimit(ctx, signer, orderLimit)
 		require.NoError(t, err)
 
-		downloader, err := client.Download(ctx, orderLimit, 0, int64(len(expectedData)))
+		downloader, err := client.Download(ctx, orderLimit, piecePrivateKey, 0, int64(len(expectedData)))
 		require.NoError(t, err)
 
 		buffer := make([]byte, len(expectedData))
@@ -303,10 +300,9 @@ func TestDelete(t *testing.T) {
 	expectedData := testrand.Bytes(10 * memory.KiB)
 	serialNumber := testrand.SerialNumber()
 
-	orderLimit := GenerateOrderLimit(
+	orderLimit, piecePrivateKey := GenerateOrderLimit(
 		t,
 		planet.Satellites[0].ID(),
-		planet.Uplinks[0].ID(),
 		planet.StorageNodes[0].ID(),
 		storj.PieceID{1},
 		pb.PieceAction_PUT,
@@ -319,7 +315,7 @@ func TestDelete(t *testing.T) {
 	orderLimit, err = signing.SignOrderLimit(ctx, signer, orderLimit)
 	require.NoError(t, err)
 
-	uploader, err := client.Upload(ctx, orderLimit)
+	uploader, err := client.Upload(ctx, orderLimit, piecePrivateKey)
 	require.NoError(t, err)
 
 	_, err = uploader.Write(expectedData)
@@ -351,10 +347,9 @@ func TestDelete(t *testing.T) {
 	} {
 		serialNumber := testrand.SerialNumber()
 
-		orderLimit := GenerateOrderLimit(
+		orderLimit, piecePrivateKey := GenerateOrderLimit(
 			t,
 			planet.Satellites[0].ID(),
-			planet.Uplinks[0].ID(),
 			planet.StorageNodes[0].ID(),
 			tt.pieceID,
 			tt.action,
@@ -367,7 +362,7 @@ func TestDelete(t *testing.T) {
 		orderLimit, err = signing.SignOrderLimit(ctx, signer, orderLimit)
 		require.NoError(t, err)
 
-		err := client.Delete(ctx, orderLimit)
+		err := client.Delete(ctx, orderLimit, piecePrivateKey)
 		if tt.err != "" {
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.err)
@@ -412,11 +407,10 @@ func TestTooManyRequests(t *testing.T) {
 		i, uplink := i, uplink
 		uploads.Go(func() (err error) {
 			storageNode := planet.StorageNodes[0].Local()
-			signer := signing.SignerFromFullIdentity(uplink.Transport.Identity())
 			config := piecestore.DefaultConfig
 			config.UploadBufferSize = 0 // disable buffering so we can detect write error early
 
-			client, err := piecestore.Dial(ctx, uplink.Transport, &storageNode.Node, uplink.Log, signer, config)
+			client, err := piecestore.Dial(ctx, uplink.Transport, &storageNode.Node, uplink.Log, config)
 			if err != nil {
 				return err
 			}
@@ -430,10 +424,9 @@ func TestTooManyRequests(t *testing.T) {
 			pieceID := storj.PieceID{byte(i + 1)}
 			serialNumber := testrand.SerialNumber()
 
-			orderLimit := GenerateOrderLimit(
+			orderLimit, piecePrivateKey := GenerateOrderLimit(
 				t,
 				planet.Satellites[0].ID(),
-				uplink.ID(),
 				planet.StorageNodes[0].ID(),
 				pieceID,
 				pb.PieceAction_PUT,
@@ -449,7 +442,7 @@ func TestTooManyRequests(t *testing.T) {
 				return err
 			}
 
-			upload, err := client.Upload(ctx, orderLimit)
+			upload, err := client.Upload(ctx, orderLimit, piecePrivateKey)
 			if err != nil {
 				if errs2.IsRPC(err, codes.Unavailable) {
 					if atomic.AddInt64(&failedCount, -1) == 0 {
@@ -490,14 +483,14 @@ func TestTooManyRequests(t *testing.T) {
 	}
 }
 
-func GenerateOrderLimit(t *testing.T, satellite storj.NodeID, uplink storj.NodeID, storageNode storj.NodeID, pieceID storj.PieceID,
-	action pb.PieceAction, serialNumber storj.SerialNumber, pieceExpiration, orderExpiration time.Duration, limit int64) *pb.OrderLimit {
+func GenerateOrderLimit(t *testing.T, satellite storj.NodeID, storageNode storj.NodeID, pieceID storj.PieceID, action pb.PieceAction, serialNumber storj.SerialNumber, pieceExpiration, orderExpiration time.Duration, limit int64) (*pb.OrderLimit, storj.PiecePrivateKey) {
+	piecePublicKey, piecePrivateKey, err := storj.NewPieceKey()
+	require.NoError(t, err)
 
 	now := time.Now()
-
 	return &pb.OrderLimit{
 		SatelliteId:     satellite,
-		UplinkId:        uplink,
+		UplinkPublicKey: piecePublicKey,
 		StorageNodeId:   storageNode,
 		PieceId:         pieceID,
 		Action:          action,
@@ -506,7 +499,7 @@ func GenerateOrderLimit(t *testing.T, satellite storj.NodeID, uplink storj.NodeI
 		OrderExpiration: now.Add(orderExpiration),
 		PieceExpiration: now.Add(pieceExpiration),
 		Limit:           limit,
-	}
+	}, piecePrivateKey
 }
 
 func TestRetain(t *testing.T) {
@@ -522,20 +515,42 @@ func TestRetain(t *testing.T) {
 		// have a recent timestamp and thus should not be deleted
 		const numOldPieces = 5
 
-		filter := bloomfilter.NewOptimal(numPiecesToKeep, 0.1)
+		// for this test, we set the false positive rate very low, so we can test which pieces should be deleted with precision
+		filter := bloomfilter.NewOptimal(numPieces, 0.000000001)
 
 		pieceIDs := generateTestIDs(numPieces)
 
 		satellite0 := testidentity.MustPregeneratedSignedIdentity(0, storj.LatestIDVersion())
 		satellite1 := testidentity.MustPregeneratedSignedIdentity(2, storj.LatestIDVersion())
 
+		whitelisted := storj.NodeURLs{
+			storj.NodeURL{ID: satellite0.ID},
+			storj.NodeURL{ID: satellite1.ID},
+		}
+
+		trusted, err := trust.NewPool(nil, whitelisted)
+		require.NoError(t, err)
+
 		uplink := testidentity.MustPregeneratedSignedIdentity(3, storj.LatestIDVersion())
-		endpoint, err := ps.NewEndpoint(zaptest.NewLogger(t), nil, nil, nil, store, pieceInfos, nil, nil, nil, ps.Config{})
+		endpointEnabled, err := ps.NewEndpoint(zaptest.NewLogger(t), nil, trusted, nil, store, pieceInfos, nil, nil, nil, ps.Config{
+			RetainStatus: ps.RetainEnabled,
+		})
+		require.NoError(t, err)
+		endpointDisabled, err := ps.NewEndpoint(zaptest.NewLogger(t), nil, trusted, nil, store, pieceInfos, nil, nil, nil, ps.Config{
+			RetainStatus: ps.RetainDisabled,
+		})
+		require.NoError(t, err)
+		endpointDebug, err := ps.NewEndpoint(zaptest.NewLogger(t), nil, trusted, nil, store, pieceInfos, nil, nil, nil, ps.Config{
+			RetainStatus: ps.RetainDebug,
+		})
 		require.NoError(t, err)
 
 		recentTime := time.Now()
 		oldTime := recentTime.Add(-time.Duration(48) * time.Hour)
 
+		// keep pieceIDs[0 : numPiecesToKeep] (old + in filter)
+		// delete pieceIDs[numPiecesToKeep : numPiecesToKeep+numOldPieces] (old + not in filter)
+		// keep pieceIDs[numPiecesToKeep+numOldPieces : numPieces] (recent + not in filter)
 		var pieceCreation time.Time
 		// add all pieces to the node pieces info DB - but only count piece ids in filter
 		for index, id := range pieceIDs {
@@ -571,7 +586,7 @@ func TestRetain(t *testing.T) {
 				PieceID:         id,
 				PieceCreation:   pieceCreation,
 				UplinkPieceHash: piecehash0,
-				Uplink:          uplink.PeerIdentity(),
+				OrderLimit:      &pb.OrderLimit{},
 			}
 			pieceinfo1 := pieces.Info{
 				SatelliteID:     satellite1.ID,
@@ -579,7 +594,7 @@ func TestRetain(t *testing.T) {
 				PieceID:         id,
 				PieceCreation:   pieceCreation,
 				UplinkPieceHash: piecehash1,
-				Uplink:          uplink.PeerIdentity(),
+				OrderLimit:      &pb.OrderLimit{},
 			}
 
 			err = pieceInfos.Add(ctx, &pieceinfo0)
@@ -602,17 +617,35 @@ func TestRetain(t *testing.T) {
 		retainReq.Filter = filter.Bytes()
 		retainReq.CreationDate = recentTime
 
-		_, err = endpoint.Retain(ctxSatellite0, &retainReq)
+		// expect that disabled and debug endpoints do not delete any pieces
+		_, err = endpointDisabled.Retain(ctxSatellite0, &retainReq)
 		require.NoError(t, err)
 
-		// check we have deleted nothing for satellite1
+		_, err = endpointDebug.Retain(ctxSatellite0, &retainReq)
+		require.NoError(t, err)
+
 		satellite1Pieces, err := pieceInfos.GetPieceIDs(ctx, satellite1.ID, recentTime.Add(time.Duration(5)*time.Second), numPieces, 0)
 		require.NoError(t, err)
 		require.Equal(t, numPieces, len(satellite1Pieces))
 
-		// check we did not delete recent pieces
 		satellite0Pieces, err := pieceInfos.GetPieceIDs(ctx, satellite0.ID, recentTime.Add(time.Duration(5)*time.Second), numPieces, 0)
 		require.NoError(t, err)
+		require.Equal(t, numPieces, len(satellite0Pieces))
+
+		// expect that enabled endpoint deletes the correct pieces
+		_, err = endpointEnabled.Retain(ctxSatellite0, &retainReq)
+		require.NoError(t, err)
+
+		// check we have deleted nothing for satellite1
+		satellite1Pieces, err = pieceInfos.GetPieceIDs(ctx, satellite1.ID, recentTime.Add(time.Duration(5)*time.Second), numPieces, 0)
+		require.NoError(t, err)
+		require.Equal(t, numPieces, len(satellite1Pieces))
+
+		// check we did not delete recent pieces or retained pieces for satellite0
+		// also check that we deleted the correct pieces for satellite0
+		satellite0Pieces, err = pieceInfos.GetPieceIDs(ctx, satellite0.ID, recentTime.Add(time.Duration(5)*time.Second), numPieces, 0)
+		require.NoError(t, err)
+		require.Equal(t, numPieces-numOldPieces, len(satellite0Pieces))
 
 		for _, id := range pieceIDs[:numPiecesToKeep] {
 			require.Contains(t, satellite0Pieces, id, "piece should not have been deleted (not in bloom filter)")
@@ -620,6 +653,10 @@ func TestRetain(t *testing.T) {
 
 		for _, id := range pieceIDs[numPiecesToKeep+numOldPieces:] {
 			require.Contains(t, satellite0Pieces, id, "piece should not have been deleted (recent piece)")
+		}
+
+		for _, id := range pieceIDs[numPiecesToKeep : numPiecesToKeep+numOldPieces] {
+			require.NotContains(t, satellite0Pieces, id, "piece should have been deleted")
 		}
 	})
 }

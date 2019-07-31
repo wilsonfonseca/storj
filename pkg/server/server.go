@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeebo/errs"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -37,6 +38,7 @@ type private struct {
 // Server represents a bundle of services defined by a specific ID.
 // Examples of servers are the satellite, the storagenode, and the uplink.
 type Server struct {
+	log      *zap.Logger
 	public   public
 	private  private
 	next     []Service
@@ -45,8 +47,14 @@ type Server struct {
 
 // New creates a Server out of an Identity, a net.Listener,
 // a UnaryServerInterceptor, and a set of services.
-func New(opts *tlsopts.Options, publicAddr, privateAddr string, interceptor grpc.UnaryServerInterceptor, services ...Service) (*Server, error) {
-	unaryInterceptor := logOnErrorUnaryInterceptor
+func New(log *zap.Logger, opts *tlsopts.Options, publicAddr, privateAddr string, interceptor grpc.UnaryServerInterceptor, services ...Service) (*Server, error) {
+	server := &Server{
+		log:      log,
+		next:     services,
+		identity: opts.Ident,
+	}
+
+	unaryInterceptor := server.logOnErrorUnaryInterceptor
 	if interceptor != nil {
 		unaryInterceptor = CombineInterceptors(unaryInterceptor, interceptor)
 	}
@@ -55,10 +63,10 @@ func New(opts *tlsopts.Options, publicAddr, privateAddr string, interceptor grpc
 	if err != nil {
 		return nil, err
 	}
-	public := public{
+	server.public = public{
 		listener: publicListener,
 		grpc: grpc.NewServer(
-			grpc.StreamInterceptor(logOnErrorStreamInterceptor),
+			grpc.StreamInterceptor(server.logOnErrorStreamInterceptor),
 			grpc.UnaryInterceptor(unaryInterceptor),
 			grpc.KeepaliveParams(keepalive.ServerParameters{
 				MaxConnectionIdle: 2 * time.Minute,
@@ -71,17 +79,12 @@ func New(opts *tlsopts.Options, publicAddr, privateAddr string, interceptor grpc
 	if err != nil {
 		return nil, errs.Combine(err, publicListener.Close())
 	}
-	private := private{
+	server.private = private{
 		listener: privateListener,
 		grpc:     grpc.NewServer(),
 	}
 
-	return &Server{
-		public:   public,
-		private:  private,
-		next:     services,
-		identity: opts.Ident,
-	}, nil
+	return server, nil
 }
 
 // Identity returns the server's identity

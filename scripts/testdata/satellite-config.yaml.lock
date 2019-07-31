@@ -64,11 +64,29 @@ defaults: "release"
 # the interval at which the satellite attempts to find new nodes via random node ID lookups
 # discovery.discovery-interval: 1s
 
+# the amount of nodes refreshed in parallel
+# discovery.refresh-concurrency: 8
+
 # the interval at which the cache refreshes itself in seconds
 # discovery.refresh-interval: 1s
 
-# the amount of nodes refreshed at each interval
+# the amount of nodes read from the overlay cache in a single pagination call
 # discovery.refresh-limit: 100
+
+# the number of nodes to concurrently send garbage collection bloom filters to
+# garbage-collection.concurrent-sends: 1
+
+# set if garbage collection is enabled or not
+# garbage-collection.enabled: false
+
+# the false positive rate used for creating a garbage collection bloom filter
+# garbage-collection.false-positive-rate: 0.1
+
+# the initial number of pieces expected for a storage node to have, used for creating a filter
+# garbage-collection.initial-pieces: 400000
+
+# the time between each send of garbage collection filters to storage nodes
+# garbage-collection.interval: 168h0m0s
 
 # help for setup
 # help: false
@@ -168,6 +186,9 @@ kademlia.operator.wallet: ""
 
 # the database connection string to use
 # metainfo.database-url: "postgres://"
+
+# how long to wait for new observers before starting iteration
+# metainfo.loop.coalesce-duration: 5s
 
 # maximum inline segment size
 # metainfo.max-inline-segment-size: 8.0 KB
@@ -283,11 +304,17 @@ kademlia.operator.wallet: ""
 # the normalization weight used to calculate the uptime SNs reputation
 # overlay.node.uptime-reputation-weight: 1
 
+# number of update requests to process per transaction
+# overlay.update-stats-batch-size: 100
+
 # how frequently repairer should try and repair more data
 # repairer.interval: 1h0m0s
 
 # maximum buffer memory (in bytes) to be allocated for read buffers
 # repairer.max-buffer-mem: 4.0 MB
+
+# ratio applied to the optimal threshold to calculate the excess of the maximum number of repaired pieces to upload
+# repairer.max-excess-rate-optimal-threshold: 0.05
 
 # maximum segments that can be repaired concurrently
 # repairer.max-repair: 5

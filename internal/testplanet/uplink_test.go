@@ -158,6 +158,9 @@ func (mock *piecestoreMock) Download(server pb.Piecestore_DownloadServer) error 
 func (mock *piecestoreMock) Delete(ctx context.Context, delete *pb.PieceDeleteRequest) (_ *pb.PieceDeleteResponse, err error) {
 	return nil, nil
 }
+func (mock *piecestoreMock) Retain(ctx context.Context, retain *pb.RetainRequest) (_ *pb.RetainResponse, err error) {
+	return nil, nil
+}
 
 func TestDownloadFromUnresponsiveNode(t *testing.T) {
 	testplanet.Run(t, testplanet.Config{
@@ -211,7 +214,7 @@ func TestDownloadFromUnresponsiveNode(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				server, err := server.New(options, storageNode.Addr(), storageNode.PrivateAddr(), nil)
+				server, err := server.New(storageNode.Log.Named("mock-server"), options, storageNode.Addr(), storageNode.PrivateAddr(), nil)
 				require.NoError(t, err)
 				pb.RegisterPiecestoreServer(server.GRPC(), &piecestoreMock{})
 				go func() {
