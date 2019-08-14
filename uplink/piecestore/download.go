@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/zeebo/errs"
+	"go.uber.org/zap"
 
 	"storj.io/storj/pkg/identity"
 	"storj.io/storj/pkg/pb"
@@ -32,10 +33,11 @@ type Download struct {
 	stream     pb.Piecestore_DownloadClient
 	ctx        context.Context
 
-	read         int64 // how much data we have read so far
-	allocated    int64 // how far have we sent orders
-	downloaded   int64 // how much data have we downloaded
-	downloadSize int64 // how much do we want to download
+	read           int64 // how much data we have read so far
+	lastAllocation int64
+	allocated      int64 // how far have we sent orders
+	downloaded     int64 // how much data have we downloaded
+	downloadSize   int64 // how much do we want to download
 
 	// what is the step we consider to upload
 	allocationStep int64
@@ -81,9 +83,10 @@ func (client *Client) Download(ctx context.Context, limit *pb.OrderLimit, pieceP
 
 		read: 0,
 
-		allocated:    0,
-		downloaded:   0,
-		downloadSize: size,
+		lastAllocation: 0,
+		allocated:      0,
+		downloaded:     0,
+		downloadSize:   size,
 
 		allocationStep: client.config.InitialStep,
 	}
@@ -128,6 +131,7 @@ func (client *Download) Read(data []byte) (read int, err error) {
 
 			// send an order
 			if newAllocation > 0 {
+				client.lastAllocation = newAllocation
 				order, err := signing.SignUplinkOrder(ctx, client.privateKey, &pb.Order{
 					SerialNumber: client.limit.SerialNumber,
 					Amount:       newAllocation,
@@ -184,6 +188,8 @@ func (client *Download) Close() (err error) {
 			err = Error.Wrap(err)
 		}
 	}()
+
+	fmt.Println(zap.Any("peer", client.peer.ID.String()), zap.Int64("allocated", client.lastAllocation), zap.Int64("downloaded", client.downloaded))
 
 	alldone := client.read == client.downloadSize
 
