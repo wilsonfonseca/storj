@@ -34,6 +34,16 @@ import (
 type Store struct {
 	roots      map[string]*node
 	defaultKey *storj.Key
+
+	// TODO: The below field makes it so we can list and remove files without
+	// trying to decrypt their paths. However, this is the wrong long-term solution.
+	// The right long-term solution is to move the PathCipher out of the bucket
+	// metadata and into the serialized EncryptionAccess (and thus this Store)
+	// but for specific roots.
+	// We should make it so instead of storing this boolean, we store path-specific
+	// PathCiphers (replacing this with EncURLSafeBase64), and only use the bucket
+	// metadata path cipher if the EncryptionAccess didn't provide one.
+	ListAndRemoveSkipDecryption bool
 }
 
 // node is a node in the Store graph. It may contain an encryption key and encrypted path,

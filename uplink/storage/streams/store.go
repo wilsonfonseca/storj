@@ -428,23 +428,23 @@ func (s *streamStore) Delete(ctx context.Context, path Path, pathCipher storj.Ci
 		return err
 	}
 
-	streamInfo, streamMeta, err := TypedDecryptStreamInfo(ctx, lastSegmentMeta.Data, path, s.encStore)
+	var streamMeta pb.StreamMeta
+	err = proto.Unmarshal(lastSegmentMeta.Data, &streamMeta)
 	if err != nil {
 		return err
 	}
-	var stream pb.StreamInfo
-	if err := proto.Unmarshal(streamInfo, &stream); err != nil {
-		return err
-	}
 
-	for i := 0; i < int(numberOfSegments(&stream, &streamMeta)-1); i++ {
-		currentPath, err := createSegmentPath(ctx, int64(i), path.Bucket(), encPath)
+	for i := int64(0); i < streamMeta.NumberOfSegments-1 || streamMeta.NumberOfSegments == 0; i++ {
+		currentPath, err := createSegmentPath(ctx, i, path.Bucket(), encPath)
 		if err != nil {
 			return err
 		}
 
 		err = s.segments.Delete(ctx, currentPath)
 		if err != nil {
+			if storage.ErrKeyNotFound.Has(err) && streamMeta.NumberOfSegments == 0 {
+				break
+			}
 			return err
 		}
 	}

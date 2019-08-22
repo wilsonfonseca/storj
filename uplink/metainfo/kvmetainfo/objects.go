@@ -139,8 +139,12 @@ func (db *DB) DeleteObject(ctx context.Context, bucket string, path storj.Path) 
 		}
 		return err
 	}
+	cipher := bucketInfo.PathCipher
+	if db.encStore.ListAndRemoveSkipDecryption {
+		cipher = storj.EncURLSafeBase64
+	}
 	prefixed := prefixedObjStore{
-		store:  objects.NewStore(db.streams, bucketInfo.PathCipher),
+		store:  objects.NewStore(db.streams, cipher),
 		prefix: bucket,
 	}
 	return prefixed.Delete(ctx, path)
@@ -167,8 +171,13 @@ func (db *DB) ListObjects(ctx context.Context, bucket string, options storj.List
 		return storj.ObjectList{}, err
 	}
 
+	cipher := bucketInfo.PathCipher
+	if db.encStore.ListAndRemoveSkipDecryption {
+		cipher = storj.EncURLSafeBase64
+	}
+
 	objects := prefixedObjStore{
-		store:  objects.NewStore(db.streams, bucketInfo.PathCipher),
+		store:  objects.NewStore(db.streams, cipher),
 		prefix: bucket,
 	}
 
@@ -195,7 +204,13 @@ func (db *DB) ListObjects(ctx context.Context, bucket string, options storj.List
 		endBefore = "\x7f\x7f\x7f\x7f\x7f\x7f\x7f"
 	}
 
-	items, more, err := objects.List(ctx, options.Prefix, startAfter, endBefore, options.Recursive, options.Limit, meta.All)
+	// TODO: we should let libuplink users be able to determine what metadata fields they request as well
+	metaFlags := meta.All
+	if db.encStore.ListAndRemoveSkipDecryption {
+		metaFlags = meta.None
+	}
+
+	items, more, err := objects.List(ctx, options.Prefix, startAfter, endBefore, options.Recursive, options.Limit, metaFlags)
 	if err != nil {
 		return storj.ObjectList{}, err
 	}
