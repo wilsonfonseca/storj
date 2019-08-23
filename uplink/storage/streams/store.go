@@ -434,6 +434,19 @@ func (s *streamStore) Delete(ctx context.Context, path Path, pathCipher storj.Ci
 		return err
 	}
 
+	// some facts:
+	//	* until we do a migration, as of PR 2859 (12d50ebb), new pointers have the
+	//    number of segments unencrypted, but old pointers don't.
+	//	  streamMeta.NumberOfSegments > 0 when the number of segments is unencrypted
+	//  * with PR 2855, when we're deleting, we don't necessarily have the
+	//    decryption keys (we might be in --encrypted mode), so we can't get the
+	//    number of segments for old pointers
+	// so, how do we make sure we delete all the segments?
+	//  * if we're a new pointer, we count until we hit the number of segments and
+	//    delete each one, skipping if the segment is already gone.
+	//  * if we're an old pointer, we just start deleting segments until we don't
+	//    find one and stop as soon as we don't find any.
+
 	for i := int64(0); i < streamMeta.NumberOfSegments-1 || streamMeta.NumberOfSegments == 0; i++ {
 		currentPath, err := createSegmentPath(ctx, i, path.Bucket(), encPath)
 		if err != nil {
@@ -442,8 +455,16 @@ func (s *streamStore) Delete(ctx context.Context, path Path, pathCipher storj.Ci
 
 		err = s.segments.Delete(ctx, currentPath)
 		if err != nil {
-			if storage.ErrKeyNotFound.Has(err) && streamMeta.NumberOfSegments == 0 {
-				break
+			if storage.ErrKeyNotFound.Has(err) {
+				if streamMeta.NumberOfSegments > 0 {
+					// the segment is missing but this is a new pointer. let's keep going
+					// until the counter runs out
+					continue
+				} else {
+					// the segment is missing and this is an old pointer. there might not
+					// be any more segments after this. stop.
+					break
+				}
 			}
 			return err
 		}
