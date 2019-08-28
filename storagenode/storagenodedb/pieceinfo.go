@@ -54,12 +54,11 @@ func (db *v0PieceInfoDB) Add(ctx context.Context, info *pieces.Info) (err error)
 		pieceExpiration = &utcExpiration
 	}
 
-	// TODO remove `uplink_cert_id` from DB
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO
-			pieceinfo_(satellite_id, piece_id, piece_size, piece_creation, piece_expiration, order_limit, uplink_piece_hash, uplink_cert_id)
-		VALUES (?,?,?,?,?,?,?,?)
-	`, info.SatelliteID, info.PieceID, info.PieceSize, info.PieceCreation.UTC(), pieceExpiration, orderLimit, uplinkPieceHash, 0)
+			pieceinfo_(satellite_id, piece_id, piece_size, piece_creation, piece_expiration, order_limit, uplink_piece_hash)
+		VALUES (?,?,?,?,?,?,?)
+	`, info.SatelliteID, info.PieceID, info.PieceSize, info.PieceCreation.UTC(), pieceExpiration, orderLimit, uplinkPieceHash)
 
 	return ErrPieceInfo.Wrap(err)
 }

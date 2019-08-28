@@ -650,6 +650,35 @@ func (db *DB) Migration() *migrate.Migration {
 					`DROP TABLE vouchers`,
 				},
 			},
+			{
+				Description: "Drop certificate table",
+				Version:     19,
+				Action: migrate.SQL{
+					`DROP INDEX pk_pieceinfo_`,
+					`DROP INDEX idx_pieceinfo__expiration`,
+					`ALTER TABLE pieceinfo_ RENAME TO pieceinfo_old`,
+					`CREATE TABLE pieceinfo_ (
+						satellite_id     BLOB      NOT NULL,
+						piece_id         BLOB      NOT NULL,
+						piece_size       BIGINT    NOT NULL,
+						piece_expiration TIMESTAMP,
+
+						order_limit       BLOB    NOT NULL,
+						uplink_piece_hash BLOB    NOT NULL,
+						uplink_cert_id    INTEGER NOT NULL,
+
+						deletion_failed_at TIMESTAMP,
+						piece_creation TIMESTAMP NOT NULL
+					)`,
+					`CREATE UNIQUE INDEX pk_pieceinfo_ ON pieceinfo_(satellite_id, piece_id)`,
+					`CREATE INDEX idx_pieceinfo__expiration ON pieceinfo_(piece_expiration) WHERE piece_expiration IS NOT NULL`,
+					`INSERT INTO pieceinfo_(satellite_id, piece_id, piece_size, piece_expiration, order_limit, uplink_piece_hash, uplink_cert_id, deletion_failed_at, piece_creation)
+						SELECT satellite_id, piece_id, piece_size, piece_expiration, order_limit, uplink_piece_hash, uplink_cert_id, deletion_failed_at, piece_creation
+						FROM pieceinfo_old`,
+					`DROP TABLE pieceinfo_old`,
+					`DROP TABLE certificate`,
+				},
+			},
 		},
 	}
 }

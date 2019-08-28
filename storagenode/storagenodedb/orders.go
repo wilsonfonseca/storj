@@ -46,14 +46,12 @@ func (db *ordersDB) Enqueue(ctx context.Context, info *orders.Info) (err error) 
 		return ErrOrders.Wrap(err)
 	}
 
-	// TODO: remove uplink_cert_id
 	_, err = db.Exec(`
 		INSERT INTO unsent_order(
 			satellite_id, serial_number,
-			order_limit_serialized, order_serialized, order_limit_expiration,
-			uplink_cert_id
-		) VALUES (?,?, ?,?,?, ?)
-	`, info.Limit.SatelliteId, info.Limit.SerialNumber, limitSerialized, orderSerialized, info.Limit.OrderExpiration.UTC(), 0)
+			order_limit_serialized, order_serialized, order_limit_expiration
+		) VALUES (?,?, ?,?,?)
+	`, info.Limit.SatelliteId, info.Limit.SerialNumber, limitSerialized, orderSerialized, info.Limit.OrderExpiration.UTC())
 
 	return ErrOrders.Wrap(err)
 }
@@ -227,12 +225,10 @@ func (db *ordersDB) archiveOne(ctx context.Context, txn *sql.Tx, archivedAt time
 		INSERT INTO order_archive_ (
 			satellite_id, serial_number,
 			order_limit_serialized, order_serialized,
-			uplink_cert_id,
 			status, archived_at
 		) SELECT
 			satellite_id, serial_number,
 			order_limit_serialized, order_serialized,
-			uplink_cert_id,
 			?, ?
 		FROM unsent_order
 		WHERE satellite_id = ? AND serial_number = ?;
